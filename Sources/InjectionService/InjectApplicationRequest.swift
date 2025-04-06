@@ -1,5 +1,6 @@
 #if os(macOS)
 import Foundation
+import HelperCommunication
 
 public struct InjectApplicationRequest: Codable, Request {
     public typealias Response = VoidResponse

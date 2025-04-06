@@ -1,5 +1,6 @@
 #if os(macOS)
 import Foundation
+import HelperCommunication
 
 public enum FileOperation: Codable {
     case createDirectory(url: URL, isIntermediateDirectories: Bool)
@@ -12,7 +13,7 @@ public enum FileOperation: Codable {
 public struct FileOperationRequest: Codable, Request {
     public typealias Response = VoidResponse
 
-    public static let identifier = "com.JH.HelperCommunication.FileOperationRequest"
+    public static let identifier = "com.JH.HelperService.FilesService.FileOperationRequest"
 
     public let operation: FileOperation
 

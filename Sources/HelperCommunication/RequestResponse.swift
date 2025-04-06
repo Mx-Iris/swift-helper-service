@@ -1,15 +1,13 @@
 import Foundation
 import OSLog
 
-public protocol Request: Codable {
-    associatedtype Response: HelperCommunication.Response
+public protocol Request<Response>: Codable {
+    associatedtype Response: Codable
 
     static var identifier: String { get }
 }
 
-public protocol Response: Codable {}
-
-public struct VoidResponse: Response, Codable {
+public struct VoidResponse: Codable {
     public init() {}
 
     public static let empty: VoidResponse = .init()

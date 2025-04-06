@@ -5,12 +5,35 @@ import PackageDescription
 
 let package = Package(
     name: "swift-helper-service",
-    platforms: [.macOS(.v10_15), .macCatalyst(.v13)],
+    platforms: [.macOS(.v11), .macCatalyst(.v14)],
     products: [
-        // Products define the executables and libraries a package produces, making them visible to other packages.
         .library(
             name: "HelperService",
             targets: ["HelperService"]
+        ),
+        .library(
+            name: "HelperCommunication",
+            targets: ["HelperCommunication"]
+        ),
+        .library(
+            name: "HelperClient",
+            targets: ["HelperClient"]
+        ),
+        .library(
+            name: "HelperServer",
+            targets: ["HelperServer"]
+        ),
+        .library(
+            name: "MainService",
+            targets: ["MainService"]
+        ),
+        .library(
+            name: "InjectionService",
+            targets: ["InjectionService"]
+        ),
+        .library(
+            name: "FilesService",
+            targets: ["FilesService"]
         ),
     ],
     dependencies: [
@@ -19,8 +42,6 @@ let package = Package(
         .package(url: "https://github.com/MxIris-Reverse-Engineering/MachInjector", branch: "main"),
     ],
     targets: [
-        // Targets are the basic building blocks of a package, defining a module or a test suite.
-        // Targets can depend on other targets in this package and products from dependencies.
         .target(
             name: "HelperService",
             dependencies: [
@@ -38,8 +59,39 @@ let package = Package(
         .target(
             name: "HelperClient",
             dependencies: [
+                "HelperService",
                 "HelperCommunication",
                 .product(name: "SwiftyXPC", package: "SwiftyXPC"),
+            ]
+        ),
+        .target(
+            name: "HelperServer",
+            dependencies: [
+                "HelperService",
+                "HelperCommunication",
+                .product(name: "SwiftyXPC", package: "SwiftyXPC"),
+            ]
+        ),
+        .target(
+            name: "MainService",
+            dependencies: [
+                "HelperCommunication",
+                "HelperService",
+            ]
+        ),
+        .target(
+            name: "InjectionService",
+            dependencies: [
+                "HelperCommunication",
+                "HelperService",
+                .product(name: "MachInjector", package: "MachInjector"),
+            ]
+        ),
+        .target(
+            name: "FilesService",
+            dependencies: [
+                "HelperService",
+                "HelperCommunication",
             ]
         ),
     ]
