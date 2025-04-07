@@ -3,7 +3,7 @@ import HelperService
 import HelperCommunication
 @preconcurrency private import SwiftyXPC
 
-public final class MainService: HelperService {
+package actor MainService: HelperService {
     private var endpointByInfo: [HelperServerInfo: XPCEndpoint] = [:]
 
     public enum Error: LocalizedError {
@@ -34,7 +34,7 @@ public final class MainService: HelperService {
 
     public init() {}
 
-    public func setupHandler(_ handler: any HelperHandler) {
+    public func setupHandler(_ handler: any HelperHandler) async {
         handler.setMessageHandler { [weak self] (request: ListServerInfosRequest) -> ListServerInfosRequest.Response in
             guard let self else { throw Error.selfDidDealloc }
             return try await listEndpoints(request: request)

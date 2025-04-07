@@ -3,6 +3,7 @@ import HelperService
 import HelperCommunication
 @preconcurrency private import SwiftyXPC
 import OSLog
+internal import MainService
 
 extension SwiftyXPC.XPCListener: @retroactive @unchecked Sendable {}
 extension SwiftyXPC.XPCListener: HelperHandler {
@@ -24,7 +25,7 @@ public final class HelperServer {
 
     private static let logger = Logger(subsystem: Bundle(for: HelperServer.self).bundleIdentifier ?? "com.JH.HelperServer", category: "\(HelperServer.self)")
 
-    public init(serverType: HelperServerType, services: [HelperService]) throws {
+    public init(serverType: HelperServerType, services: [HelperService]) async throws {
         self.serverType = serverType
         switch serverType {
         case .plain:
@@ -32,10 +33,11 @@ public final class HelperServer {
         case let .machService(name):
             self.listener = try SwiftyXPC.XPCListener(type: .machService(name: name), codeSigningRequirement: nil)
         }
+        let services = [MainService()] + services
         self.services = services
-
+        
         for service in services {
-            service.setupHandler(listener)
+            await service.setupHandler(listener)
         }
 
         listener.errorHandler = { connection, error in
@@ -58,7 +60,7 @@ public final class HelperServer {
         try await connection.sendMessage(request: RegisterEndpointRequest(info: .init(name: machServiceName, identifier: identifier), endpoint: listener.endpoint))
     }
 
-    public func activate() {
+    public func activate() async {
         listener.activate()
     }
 }

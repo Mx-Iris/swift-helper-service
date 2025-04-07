@@ -2,9 +2,9 @@ import Foundation
 import HelperService
 import HelperCommunication
 
-public final class FilesService: HelperService {
+public actor FilesService: HelperService {
     public init() {}
-    public func setupHandler(_ handler: any HelperHandler) {
+    public func setupHandler(_ handler: any HelperHandler) async {
         handler.setMessageHandler { (request: FileOperationRequest) -> FileOperationRequest.Response in
             let fileManager = FileManager.default
             switch request.operation {

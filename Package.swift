@@ -12,20 +12,12 @@ let package = Package(
             targets: ["HelperService"]
         ),
         .library(
-            name: "HelperCommunication",
-            targets: ["HelperCommunication"]
-        ),
-        .library(
             name: "HelperClient",
             targets: ["HelperClient"]
         ),
         .library(
             name: "HelperServer",
             targets: ["HelperServer"]
-        ),
-        .library(
-            name: "MainService",
-            targets: ["MainService"]
         ),
         .library(
             name: "InjectionService",
@@ -37,7 +29,6 @@ let package = Package(
         ),
     ],
     dependencies: [
-        .package(url: "https://github.com/swift-server/swift-service-lifecycle", from: "2.7.0"),
         .package(url: "https://github.com/MxIris-macOS-Library-Forks/SwiftyXPC", branch: "main"),
         .package(url: "https://github.com/MxIris-Reverse-Engineering/MachInjector", branch: "main"),
     ],
@@ -47,7 +38,6 @@ let package = Package(
             dependencies: [
                 "HelperCommunication",
                 .product(name: "SwiftyXPC", package: "SwiftyXPC"),
-                .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
             ]
         ),
         .target(
@@ -69,6 +59,7 @@ let package = Package(
             dependencies: [
                 "HelperService",
                 "HelperCommunication",
+                "MainService",
                 .product(name: "SwiftyXPC", package: "SwiftyXPC"),
             ]
         ),
@@ -77,7 +68,8 @@ let package = Package(
             dependencies: [
                 "HelperCommunication",
                 "HelperService",
-            ]
+            ],
+            path: "Sources/HelperServices/MainService"
         ),
         .target(
             name: "InjectionService",
@@ -85,14 +77,16 @@ let package = Package(
                 "HelperCommunication",
                 "HelperService",
                 .product(name: "MachInjector", package: "MachInjector"),
-            ]
+            ],
+            path: "Sources/HelperServices/InjectionService"
         ),
         .target(
             name: "FilesService",
             dependencies: [
                 "HelperService",
                 "HelperCommunication",
-            ]
+            ],
+            path: "Sources/HelperServices/FilesService"
         ),
     ]
 )

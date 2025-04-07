@@ -1,5 +1,5 @@
 import Foundation
-@preconcurrency package import SwiftyXPC
+@preconcurrency internal import SwiftyXPC
 
 package final class HelperTool {
     private var connection: SwiftyXPC.XPCConnection?
