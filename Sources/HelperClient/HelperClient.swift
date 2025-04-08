@@ -77,7 +77,7 @@ public actor HelperClient {
     }
 
     public func installTool(name: String) async throws {
-        guard await !isConnectedToTool else { throw Error.message("Helper already installed") }
+//        guard await !isConnectedToTool else { throw Error.message("Helper already installed") }
         func executeAuthorizationFunction(_ authorizationFunction: () -> (OSStatus)) throws {
             let osStatus = authorizationFunction()
             guard osStatus == errAuthorizationSuccess else {

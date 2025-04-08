@@ -1,11 +1,11 @@
 import HelperCommunication
 
-public protocol HelperService: Sendable {
+public protocol HelperService {
     func setupHandler(_ handler: HelperHandler) async
     func run() async throws
 }
 
-public protocol HelperHandler: Sendable {
+public protocol HelperHandler {
     func setMessageHandler<Request: HelperCommunication.Request>(handler: @escaping (Request) async throws -> Request.Response)
     func activate() async
 }
