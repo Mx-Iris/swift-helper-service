@@ -4,7 +4,7 @@ import HelperCommunication
 @preconcurrency private import SwiftyXPC
 
 package actor MainService: HelperService {
-    private var endpointByInfo: [HelperServerInfo: XPCEndpoint] = [:]
+    private var endpointByInfo: [HelperServerInfo: SwiftyXPC.XPCEndpoint] = [:]
 
     public enum Error: LocalizedError {
         case selfDidDealloc

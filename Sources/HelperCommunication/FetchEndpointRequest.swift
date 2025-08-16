@@ -17,9 +17,9 @@ package struct FetchEndpointRequest: Codable, Request {
     package static let identifier: String = "com.JH.HelperCommunication.FetchEndpoint"
 
     package struct Response: Codable {
-        package let endpoint: XPCEndpoint
+        package let endpoint: SwiftyXPC.XPCEndpoint
 
-        package init(endpoint: XPCEndpoint) {
+        package init(endpoint: SwiftyXPC.XPCEndpoint) {
             self.endpoint = endpoint
         }
     }
@@ -52,9 +52,9 @@ package struct RegisterEndpointRequest: Codable, Request {
 
     package let info: HelperServerInfo
 
-    package let endpoint: XPCEndpoint
+    package let endpoint: SwiftyXPC.XPCEndpoint
 
-    package init(info: HelperServerInfo, endpoint: XPCEndpoint) {
+    package init(info: HelperServerInfo, endpoint: SwiftyXPC.XPCEndpoint) {
         self.info = info
         self.endpoint = endpoint
     }
