@@ -4,7 +4,7 @@ import HelperCommunication
 
 public actor FilesService: HelperService {
     public init() {}
-    public func setupHandler(_ handler: any HelperHandler) async {
+    public func setupHandler(_ handler: some HelperHandler) async {
         handler.setMessageHandler { (request: FileOperationRequest) -> FileOperationRequest.Response in
             let fileManager = FileManager.default
             switch request.operation {

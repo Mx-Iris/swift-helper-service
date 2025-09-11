@@ -4,7 +4,7 @@ import MachInjector
 
 public actor InjectionService: HelperService {
     public init() {}
-    public func setupHandler(_ handler: any HelperHandler) async {
+    public func setupHandler(_ handler: some HelperHandler) async {
         handler.setMessageHandler { (request: InjectApplicationRequest) -> InjectApplicationRequest.Response in
             try MachInjector.inject(pid: request.pid, dylibPath: request.dylibURL.path)
             return .empty

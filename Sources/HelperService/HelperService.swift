@@ -1,7 +1,7 @@
 import HelperCommunication
 
 public protocol HelperService: Sendable {
-    func setupHandler(_ handler: HelperHandler) async
+    func setupHandler(_ handler: some HelperHandler) async
     func run() async throws
 }
 

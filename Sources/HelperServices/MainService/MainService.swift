@@ -34,7 +34,7 @@ package actor MainService: HelperService {
 
     public init() {}
 
-    public func setupHandler(_ handler: any HelperHandler) async {
+    public func setupHandler(_ handler: some HelperHandler) async {
         handler.setMessageHandler { [weak self] (request: ListServerInfosRequest) -> ListServerInfosRequest.Response in
             guard let self else { throw Error.selfDidDealloc }
             return try await listEndpoints(request: request)
