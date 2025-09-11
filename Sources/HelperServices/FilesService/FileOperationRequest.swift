@@ -2,7 +2,7 @@
 import Foundation
 import HelperCommunication
 
-public enum FileOperation: Codable {
+public enum FileOperation: Codable, Sendable {
     case createDirectory(url: URL, isIntermediateDirectories: Bool)
     case remove(url: URL)
     case move(from: URL, to: URL)

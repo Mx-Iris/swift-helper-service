@@ -1,7 +1,7 @@
 import Foundation
 @preconcurrency internal import SwiftyXPC
 
-package final class HelperTool {
+package actor HelperTool {
     private var connection: SwiftyXPC.XPCConnection?
 
     private let machServiceName: String

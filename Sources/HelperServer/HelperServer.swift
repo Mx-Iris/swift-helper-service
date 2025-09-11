@@ -5,16 +5,7 @@ import HelperCommunication
 import OSLog
 internal import MainService
 
-extension SwiftyXPC.XPCListener: @retroactive @unchecked Sendable {}
-extension SwiftyXPC.XPCListener: HelperHandler {
-    func setMessageHandler<Request>(handler: @escaping (Request) async throws -> Request.Response) where Request: HelperCommunication.Request {
-        setMessageHandler { connection, request in
-            try await handler(request)
-        }
-    }
-}
-
-public final class HelperServer {
+public actor HelperServer {
     private let serverType: HelperServerType
 
     private let listener: SwiftyXPC.XPCListener
@@ -30,12 +21,12 @@ public final class HelperServer {
         switch serverType {
         case .plain:
             self.listener = try SwiftyXPC.XPCListener(type: .anonymous, codeSigningRequirement: nil)
-        case let .machService(name):
+        case .machService(let name):
             self.listener = try SwiftyXPC.XPCListener(type: .machService(name: name), codeSigningRequirement: nil)
         }
         let services = [MainService()] + services
         self.services = services
-        
+
         for service in services {
             await service.setupHandler(listener)
         }
@@ -46,7 +37,7 @@ public final class HelperServer {
     }
 
     public func connectToTool(machServiceName: String, isPrivilegedHelperTool: Bool) async throws {
-        guard case let .plain(_, identifier) = serverType else {
+        guard case .plain(_, let identifier) = serverType else {
             return
         }
         let connection = try SwiftyXPC.XPCConnection(type: .remoteMachService(serviceName: machServiceName, isPrivilegedHelperTool: isPrivilegedHelperTool))
@@ -62,5 +53,15 @@ public final class HelperServer {
 
     public func activate() async {
         listener.activate()
+    }
+}
+
+extension SwiftyXPC.XPCListener: @retroactive @unchecked Sendable {}
+
+extension SwiftyXPC.XPCListener: HelperHandler {
+    func setMessageHandler<Request>(handler: @escaping (Request) async throws -> Request.Response) where Request: HelperCommunication.Request {
+        setMessageHandler { connection, request in
+            try await handler(request)
+        }
     }
 }

@@ -2,7 +2,7 @@
 import Foundation
 @preconcurrency package import SwiftyXPC
 
-public struct HelperServerInfo: Hashable, Codable {
+public struct HelperServerInfo: Hashable, Codable, Sendable {
     public let name: String
 
     public let identifier: String
