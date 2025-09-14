@@ -20,12 +20,20 @@ let package = Package(
             targets: ["HelperServer"]
         ),
         .library(
+            name: "InjectionService",
+            targets: ["InjectionServiceInterface", "InjectionServiceImplementation"]
+        ),
+        .library(
             name: "InjectionServiceInterface",
             targets: ["InjectionServiceInterface"]
         ),
         .library(
             name: "InjectionServiceImplementation",
             targets: ["InjectionServiceImplementation"]
+        ),
+        .library(
+            name: "FilesService",
+            targets: ["FilesServiceInterface", "FilesServiceImplementation"]
         ),
         .library(
             name: "FilesServiceInterface",
@@ -98,6 +106,7 @@ let package = Package(
         .target(
             name: "InjectionServiceImplementation",
             dependencies: [
+                "InjectionServiceInterface",
                 "HelperCommunication",
                 "HelperService",
                 .product(name: "MachInjector", package: "MachInjector"),
@@ -122,6 +131,7 @@ let package = Package(
         .target(
             name: "FilesServiceImplementation",
             dependencies: [
+                "FilesServiceInterface",
                 "HelperService",
                 "HelperCommunication",
             ],

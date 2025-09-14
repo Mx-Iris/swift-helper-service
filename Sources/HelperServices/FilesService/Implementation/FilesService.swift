@@ -1,6 +1,7 @@
 import Foundation
 import HelperService
 import HelperCommunication
+import FilesServiceInterface
 
 public actor FilesService: HelperService {
     public init() {}

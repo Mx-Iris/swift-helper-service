@@ -1,6 +1,7 @@
 import Foundation
 import HelperService
 import MachInjector
+import InjectionServiceInterface
 
 public actor InjectionService: HelperService {
     public init() {}
