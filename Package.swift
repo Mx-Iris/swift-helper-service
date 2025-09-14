@@ -1,4 +1,4 @@
-// swift-tools-version: 6.1
+// swift-tools-version: 6.2
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
@@ -20,12 +20,20 @@ let package = Package(
             targets: ["HelperServer"]
         ),
         .library(
-            name: "InjectionService",
-            targets: ["InjectionService"]
+            name: "InjectionServiceInterface",
+            targets: ["InjectionServiceInterface"]
         ),
         .library(
-            name: "FilesService",
-            targets: ["FilesService"]
+            name: "InjectionServiceImplementation",
+            targets: ["InjectionServiceImplementation"]
+        ),
+        .library(
+            name: "FilesServiceInterface",
+            targets: ["FilesServiceInterface"]
+        ),
+        .library(
+            name: "FilesServiceImplementation",
+            targets: ["FilesServiceImplementation"]
         ),
     ],
     dependencies: [
@@ -71,22 +79,53 @@ let package = Package(
             ],
             path: "Sources/HelperServices/MainService"
         ),
+//        .target(
+//            name: "InjectionService",
+//            dependencies: [
+//                "HelperCommunication",
+//                "HelperService",
+//                .product(name: "MachInjector", package: "MachInjector"),
+//            ],
+//            path: "Sources/HelperServices/InjectionService"
+//        ),
         .target(
-            name: "InjectionService",
+            name: "InjectionServiceInterface",
+            dependencies: [
+                "HelperCommunication",
+            ],
+            path: "Sources/HelperServices/InjectionService/Interface"
+        ),
+        .target(
+            name: "InjectionServiceImplementation",
             dependencies: [
                 "HelperCommunication",
                 "HelperService",
                 .product(name: "MachInjector", package: "MachInjector"),
             ],
-            path: "Sources/HelperServices/InjectionService"
+            path: "Sources/HelperServices/InjectionService/Implementation"
+        ),
+//        .target(
+//            name: "FilesService",
+//            dependencies: [
+//                "HelperService",
+//                "HelperCommunication",
+//            ],
+//            path: "Sources/HelperServices/FilesService"
+//        ),
+        .target(
+            name: "FilesServiceInterface",
+            dependencies: [
+                "HelperCommunication",
+            ],
+            path: "Sources/HelperServices/FilesService/Interface"
         ),
         .target(
-            name: "FilesService",
+            name: "FilesServiceImplementation",
             dependencies: [
                 "HelperService",
                 "HelperCommunication",
             ],
-            path: "Sources/HelperServices/FilesService"
+            path: "Sources/HelperServices/FilesService/Implementation"
         ),
     ]
 )

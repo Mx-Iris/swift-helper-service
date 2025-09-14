@@ -15,7 +15,6 @@ package actor MainService: HelperService {
         return .empty
     }
 
-
     private func fetchEndpoint(request: FetchEndpointRequest) async throws -> FetchEndpointRequest.Response {
         guard let endpoint = endpointByInfo[request.info] else {
             throw Error.notFound
