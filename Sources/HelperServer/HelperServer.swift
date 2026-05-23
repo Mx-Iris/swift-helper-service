@@ -2,9 +2,10 @@ import AppKit
 import HelperService
 import HelperCommunication
 @preconcurrency private import SwiftyXPC
-import OSLog
+import FoundationToolbox
 internal import MainService
 
+@Loggable
 public actor HelperServer {
     private let serverType: HelperServerType
 
@@ -13,8 +14,6 @@ public actor HelperServer {
     private let services: [HelperService]
 
     private var toolConnection: SwiftyXPC.XPCConnection?
-
-    private static let logger = Logger(subsystem: Bundle(for: HelperServer.self).bundleIdentifier ?? "com.JH.HelperServer", category: "\(HelperServer.self)")
 
     public init(serverType: HelperServerType, version: String, services: [HelperService]) async throws {
         self.serverType = serverType
@@ -27,12 +26,13 @@ public actor HelperServer {
         let services = [MainService(version: version)] + services
         self.services = services
 
+        let handlerAdapter = XPCHelperHandler(listener: listener)
         for service in services {
-            await service.setupHandler(listener)
+            await service.setupHandler(handlerAdapter)
         }
 
         listener.errorHandler = { connection, error in
-            Self.logger.error("Listener error: \(error)")
+            #log(.error, "Listener error: \(String(describing: error), privacy: .public)")
         }
     }
 
@@ -44,7 +44,7 @@ public actor HelperServer {
         connection.activate()
         try await connection.pingHelperTool()
         connection.errorHandler = { connection, error in
-            Self.logger.error("\(error)")
+            #log(.error, "Tool connection error: \(String(describing: error), privacy: .public)")
         }
         toolConnection = connection
         try await connection.registerEndpoint(listener.endpoint, machServiceName: machServiceName, identifier: identifier)

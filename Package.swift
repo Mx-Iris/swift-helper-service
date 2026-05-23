@@ -5,7 +5,7 @@ import PackageDescription
 
 let package = Package(
     name: "swift-helper-service",
-    platforms: [.macOS(.v11), .macCatalyst(.v14)],
+    platforms: [.macOS(.v10_15), .macCatalyst(.v13)],
     products: [
         .library(
             name: "HelperCommunication",
@@ -55,6 +55,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/MxIris-macOS-Library-Forks/SwiftyXPC", branch: "main"),
         .package(url: "https://github.com/MxIris-Reverse-Engineering/MachInjector", branch: "main"),
+        .package(url: "https://github.com/Mx-Iris/FrameworkToolbox", from: "0.5.5"),
     ],
     targets: [
         .target(
@@ -62,12 +63,14 @@ let package = Package(
             dependencies: [
                 "HelperCommunication",
                 .product(name: "SwiftyXPC", package: "SwiftyXPC"),
+                .product(name: "FoundationToolbox", package: "FrameworkToolbox"),
             ]
         ),
         .target(
             name: "HelperCommunication",
             dependencies: [
                 .product(name: "SwiftyXPC", package: "SwiftyXPC"),
+                .product(name: "FoundationToolbox", package: "FrameworkToolbox"),
             ]
         ),
         .target(
@@ -76,6 +79,7 @@ let package = Package(
                 "HelperService",
                 "HelperCommunication",
                 .product(name: "SwiftyXPC", package: "SwiftyXPC"),
+                .product(name: "FoundationToolbox", package: "FrameworkToolbox"),
             ]
         ),
         .target(
@@ -85,6 +89,7 @@ let package = Package(
                 "HelperCommunication",
                 "MainService",
                 .product(name: "SwiftyXPC", package: "SwiftyXPC"),
+                .product(name: "FoundationToolbox", package: "FrameworkToolbox"),
             ]
         ),
         .target(
@@ -93,6 +98,7 @@ let package = Package(
                 "HelperCommunication",
                 "HelperService",
                 .product(name: "SwiftyXPC", package: "SwiftyXPC"),
+                .product(name: "FoundationToolbox", package: "FrameworkToolbox"),
             ]
         ),
         .target(

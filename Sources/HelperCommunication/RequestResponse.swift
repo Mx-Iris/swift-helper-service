@@ -1,5 +1,4 @@
 import Foundation
-import OSLog
 
 public protocol Request<Response>: Codable, Sendable {
     associatedtype Response: Codable & Sendable

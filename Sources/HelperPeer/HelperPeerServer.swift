@@ -1,14 +1,15 @@
 #if canImport(AppKit) && !targetEnvironment(macCatalyst)
 import Foundation
-import HelperCommunication
+public import HelperCommunication
 import HelperService
-@preconcurrency public import SwiftyXPC
-import OSLog
+@preconcurrency internal import SwiftyXPC
+import FoundationToolbox
 
 /// Peer that participates in a brokered XPC topology as the *server* (the one that
 /// fetches the peer's endpoint from the broker, opens a direct reverse connection,
 /// and registers its own endpoint for later host-side reconnects).
-public actor BrokeredPeerServer: PeerConnection {
+@Loggable
+public actor HelperPeerServer: PeerConnection {
     public enum Error: LocalizedError {
         case peerNotConnected
         case cancelled
@@ -29,14 +30,12 @@ public actor BrokeredPeerServer: PeerConnection {
 
     private nonisolated let serviceConnection: SwiftyXPC.XPCConnection
 
-    private nonisolated let logger = Logger(subsystem: "com.JH.HelperPeer", category: "BrokeredPeerServer")
-
     private var peerConnection: SwiftyXPC.XPCConnection?
 
     private var isCancelled: Bool = false
 
-    public nonisolated var listenerEndpoint: SwiftyXPC.XPCEndpoint {
-        get async { listener.endpoint }
+    public nonisolated var listenerEndpoint: HelperPeerEndpoint {
+        get async { HelperPeerEndpoint(listener.endpoint) }
     }
 
     public init(
@@ -64,8 +63,9 @@ public actor BrokeredPeerServer: PeerConnection {
         self.peerConnection = nil
 
         await wireListenerHandlers()
+        let handlerAdapter = XPCHelperHandler(listener: listener)
         for service in services {
-            await service.setupHandler(listener)
+            await service.setupHandler(handlerAdapter)
         }
 
         let peerConnection: SwiftyXPC.XPCConnection
@@ -75,7 +75,7 @@ public actor BrokeredPeerServer: PeerConnection {
             peerConnection = try SwiftyXPC.XPCConnection(type: .remoteServiceFromEndpoint(clientEndpoint))
             peerConnection.activate()
             try await peerConnection.pingHelperTool()
-            try await peerConnection.sendMessage(request: ServerLaunchedNotification(endpoint: listener.endpoint))
+            try await peerConnection.sendMessage(request: ServerLaunchedNotification(endpoint: HelperPeerEndpoint(listener.endpoint)))
             // Re-register own listener endpoint so the host can directly reconnect later.
             try await serviceConnection.registerEndpoint(listener.endpoint, machServiceName: machServiceName, identifier: identifier)
         } catch {
@@ -98,11 +98,63 @@ public actor BrokeredPeerServer: PeerConnection {
         return try await peerConnection.sendMessage(request: request)
     }
 
-    public func setMessageHandler<Request: HelperCommunication.Request>(
+    public nonisolated func setMessageHandler<Request: HelperCommunication.Request>(
         _ requestType: Request.Type,
         handler: @escaping @Sendable (Request) async throws -> Request.Response
-    ) async {
+    ) {
         listener.setMessageHandler(requestType: requestType) { _, request in
+            try await handler(request)
+        }
+    }
+
+    // MARK: - Untyped (name-based) RPC
+
+    public nonisolated func sendMessage(name: String) async throws {
+        let peer = try await currentPeerOrThrow()
+        try await peer.sendMessage(name: name)
+    }
+
+    public nonisolated func sendMessage<Request: Codable>(name: String, request: Request) async throws {
+        let peer = try await currentPeerOrThrow()
+        try await peer.sendMessage(name: name, request: request)
+    }
+
+    public nonisolated func sendMessage<Response: Codable & Sendable>(name: String) async throws -> Response {
+        let peer = try await currentPeerOrThrow()
+        return try await peer.sendMessage(name: name)
+    }
+
+    public nonisolated func sendMessage<Response: Codable & Sendable>(name: String, request: some Codable) async throws -> Response {
+        let peer = try await currentPeerOrThrow()
+        return try await peer.sendMessage(name: name, request: request)
+    }
+
+    private func currentPeerOrThrow() throws -> SwiftyXPC.XPCConnection {
+        if isCancelled { throw Error.cancelled }
+        guard let peerConnection else { throw Error.peerNotConnected }
+        return peerConnection
+    }
+
+    public nonisolated func setMessageHandler(name: String, handler: @escaping @Sendable () async throws -> Void) {
+        listener.setMessageHandler(name: name) { (_: SwiftyXPC.XPCConnection) in
+            try await handler()
+        }
+    }
+
+    public nonisolated func setMessageHandler<Request: Codable>(name: String, handler: @escaping @Sendable (Request) async throws -> Void) {
+        listener.setMessageHandler(name: name) { (_: SwiftyXPC.XPCConnection, request: Request) in
+            try await handler(request)
+        }
+    }
+
+    public nonisolated func setMessageHandler<Response: Codable>(name: String, handler: @escaping @Sendable () async throws -> Response) {
+        listener.setMessageHandler(name: name) { (_: SwiftyXPC.XPCConnection) -> Response in
+            try await handler()
+        }
+    }
+
+    public nonisolated func setMessageHandler<Request: Codable, Response: Codable>(name: String, handler: @escaping @Sendable (Request) async throws -> Response) {
+        listener.setMessageHandler(name: name) { (_: SwiftyXPC.XPCConnection, request: Request) -> Response in
             try await handler(request)
         }
     }
@@ -131,10 +183,10 @@ public actor BrokeredPeerServer: PeerConnection {
         }
     }
 
-    private func handleClientReconnected(endpoint: SwiftyXPC.XPCEndpoint) async {
+    private func handleClientReconnected(endpoint: HelperPeerEndpoint) async {
         guard !isCancelled else { return }
         do {
-            let newPeerConnection = try SwiftyXPC.XPCConnection(type: .remoteServiceFromEndpoint(endpoint))
+            let newPeerConnection = try SwiftyXPC.XPCConnection(type: .remoteServiceFromEndpoint(endpoint.underlying))
             newPeerConnection.activate()
             try await newPeerConnection.pingHelperTool()
             peerConnection?.cancel()
@@ -148,13 +200,11 @@ public actor BrokeredPeerServer: PeerConnection {
 
     private func configureErrorHandlers() {
         listener.errorHandler = { [weak self] _, error in
-            guard let self else { return }
-            self.logger.error("Listener error: \(String(describing: error), privacy: .public)")
-            self.stateContinuation.yield(.disconnected(error))
+            #log(.error, "Listener error: \(String(describing: error), privacy: .public)")
+            self?.stateContinuation.yield(.disconnected(error))
         }
-        serviceConnection.errorHandler = { [weak self] _, error in
-            guard let self else { return }
-            self.logger.error("Service connection error: \(String(describing: error), privacy: .public)")
+        serviceConnection.errorHandler = { _, error in
+            #log(.error, "Service connection error: \(String(describing: error), privacy: .public)")
         }
         if let peerConnection {
             installPeerErrorHandler(on: peerConnection)
@@ -163,9 +213,8 @@ public actor BrokeredPeerServer: PeerConnection {
 
     private nonisolated func installPeerErrorHandler(on connection: SwiftyXPC.XPCConnection) {
         connection.errorHandler = { [weak self] _, error in
-            guard let self else { return }
-            self.logger.error("Peer connection error: \(String(describing: error), privacy: .public)")
-            self.stateContinuation.yield(.disconnected(error))
+            #log(.error, "Peer connection error: \(String(describing: error), privacy: .public)")
+            self?.stateContinuation.yield(.disconnected(error))
         }
     }
 }
