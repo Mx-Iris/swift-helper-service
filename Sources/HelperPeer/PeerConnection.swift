@@ -22,6 +22,14 @@ public protocol PeerConnection: Actor, Sendable {
     /// Completes the handshake. Must be called exactly once after construction,
     /// after any business message handlers have been installed via
     /// `setMessageHandler(...)`. See the conforming type's docs for details.
+    ///
+    /// - Important: `init` is intentionally a no-op on the wire — it only
+    ///   constructs the listener and the lib-internal handshake handlers.
+    ///   Callers MUST install every business handler before invoking
+    ///   `activate()`, otherwise the peer may receive inbound messages with
+    ///   no matching handler. Folding the handshake into `init` produces a
+    ///   silent race against handler installation; see the two-phase
+    ///   lifecycle notes on `HelperPeerClient` / `HelperPeerServer`.
     func activate() async throws
 
     /// Send a typed `Request` to the peer. Throws if no peer connection is established
