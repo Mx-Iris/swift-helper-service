@@ -13,16 +13,34 @@ import FoundationToolbox
 ///   `ServerLaunchedNotification` to populate the peer connection.
 /// - Reconnect with known `serverEndpoint`: open listener, direct-connect to the
 ///   peer's endpoint, notify peer to swap its peer connection.
+///
+/// ## Two-phase lifecycle
+///
+/// `init` only constructs the listener, broker connection, and the lib-internal
+/// handshake handlers (PingRequest + ServerLaunchedNotification). It does **not**
+/// activate the listener nor register the endpoint with the broker. This lets
+/// callers install their own business message handlers on the listener via
+/// `setMessageHandler(...)` *before* the broker/peer can route any inbound
+/// message — eliminating a race where the peer would send messages before the
+/// caller's handlers are wired up.
+///
+/// Call `activate()` once the business handlers are installed. The peer then
+/// activates the listener, registers the endpoint with the broker (initial
+/// mode) or notifies the existing peer via `ClientReconnectedNotification`
+/// (reconnect mode), and transitions to `.connected` (reconnect mode) /
+/// waits for `ServerLaunched` (initial mode).
 @Loggable
 public actor HelperPeerClient: PeerConnection {
     public enum Error: LocalizedError {
         case peerNotConnected
         case cancelled
+        case alreadyActivated
 
         public var errorDescription: String? {
             switch self {
             case .peerNotConnected: return "Peer connection not established"
             case .cancelled: return "Peer was cancelled"
+            case .alreadyActivated: return "Peer was already activated"
             }
         }
     }
@@ -39,13 +57,23 @@ public actor HelperPeerClient: PeerConnection {
 
     private var isCancelled: Bool = false
 
+    private var hasActivated: Bool = false
+
+    private let pendingActivation: PendingActivation
+
     public nonisolated var listenerEndpoint: HelperPeerEndpoint {
         get async { HelperPeerEndpoint(listener.endpoint) }
     }
 
-    /// Initial-handshake init. Connects to the tool, registers the listener endpoint
-    /// under `(machServiceName, identifier)`, and waits for the peer's
-    /// `ServerLaunchedNotification` (delivered asynchronously after activation).
+    private enum PendingActivation {
+        case initial(machServiceName: String, identifier: String)
+        case reconnect(machServiceName: String, identifier: String, serverEndpoint: SwiftyXPC.XPCEndpoint)
+    }
+
+    /// Initial-handshake init. Connects to the tool but does **not** register
+    /// the endpoint or activate the listener — install business handlers via
+    /// `setMessageHandler(...)`, then call `activate()` to complete the
+    /// handshake and wait for the peer's `ServerLaunchedNotification`.
     public init(
         machServiceName: String,
         isPrivilegedHelperTool: Bool,
@@ -69,29 +97,19 @@ public actor HelperPeerClient: PeerConnection {
         self.serviceConnection = serviceConnection
 
         self.peerConnection = nil
+        self.pendingActivation = .initial(machServiceName: machServiceName, identifier: identifier)
 
         await wireListenerHandlers(initialHandshake: true)
         let handlerAdapter = XPCHelperHandler(listener: listener)
         for service in services {
             await service.setupHandler(handlerAdapter)
         }
-
-        do {
-            try await serviceConnection.pingHelperTool()
-            try await serviceConnection.registerEndpoint(listener.endpoint, machServiceName: machServiceName, identifier: identifier)
-        } catch {
-            stateContinuation.yield(.disconnected(error))
-            throw error
-        }
-
-        configureErrorHandlers()
-        listener.activate()
     }
 
-    /// Reconnect init. Opens a fresh listener, direct-connects to the peer's known
-    /// `serverEndpoint`, notifies peer via `ClientReconnectedNotification`. Used when
-    /// the host app reconnects to an already-running peer process (e.g. an injected
-    /// app's existing `HelperPeerServer`).
+    /// Reconnect init. Does **not** open the reverse peer connection or send
+    /// `ClientReconnectedNotification` yet — install business handlers via
+    /// `setMessageHandler(...)`, then call `activate()` to complete the
+    /// reconnect.
     public init(
         machServiceName: String,
         isPrivilegedHelperTool: Bool,
@@ -115,27 +133,53 @@ public actor HelperPeerClient: PeerConnection {
         serviceConnection.activate()
         self.serviceConnection = serviceConnection
 
-        let peerConnection = try SwiftyXPC.XPCConnection(type: .remoteServiceFromEndpoint(serverEndpoint.underlying))
-        peerConnection.activate()
-        self.peerConnection = peerConnection
+        self.peerConnection = nil
+        self.pendingActivation = .reconnect(machServiceName: machServiceName, identifier: identifier, serverEndpoint: serverEndpoint.underlying)
 
         await wireListenerHandlers(initialHandshake: false)
         let handlerAdapter = XPCHelperHandler(listener: listener)
         for service in services {
             await service.setupHandler(handlerAdapter)
         }
+    }
 
-        do {
-            try await peerConnection.pingHelperTool()
-            try await peerConnection.sendMessage(request: ClientReconnectedNotification(endpoint: HelperPeerEndpoint(listener.endpoint)))
-        } catch {
-            stateContinuation.yield(.disconnected(error))
-            throw error
+    /// Completes the handshake. Must be called exactly once after construction.
+    public func activate() async throws {
+        guard !hasActivated else { throw Error.alreadyActivated }
+        hasActivated = true
+
+        switch pendingActivation {
+        case .initial(let machServiceName, let identifier):
+            do {
+                // Activate the listener BEFORE registering the endpoint so the
+                // peer (server) can immediately open a reverse connection back.
+                listener.activate()
+                try await serviceConnection.pingHelperTool()
+                try await serviceConnection.registerEndpoint(listener.endpoint, machServiceName: machServiceName, identifier: identifier)
+            } catch {
+                stateContinuation.yield(.disconnected(error))
+                throw error
+            }
+            configureErrorHandlers()
+            // .connected is yielded asynchronously when handleServerLaunched fires.
+
+        case .reconnect(_, _, let serverEndpoint):
+            let peerConnection: SwiftyXPC.XPCConnection
+            do {
+                peerConnection = try SwiftyXPC.XPCConnection(type: .remoteServiceFromEndpoint(serverEndpoint))
+                peerConnection.activate()
+                self.peerConnection = peerConnection
+
+                listener.activate()
+                try await peerConnection.pingHelperTool()
+                try await peerConnection.sendMessage(request: ClientReconnectedNotification(endpoint: HelperPeerEndpoint(listener.endpoint)))
+            } catch {
+                stateContinuation.yield(.disconnected(error))
+                throw error
+            }
+            configureErrorHandlers()
+            stateContinuation.yield(.connected)
         }
-
-        configureErrorHandlers()
-        listener.activate()
-        stateContinuation.yield(.connected)
     }
 
     // MARK: - PeerConnection

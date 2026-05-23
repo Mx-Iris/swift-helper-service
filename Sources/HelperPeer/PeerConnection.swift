@@ -19,6 +19,11 @@ public protocol PeerConnection: Actor, Sendable {
     /// peers can directly reconnect later.
     var listenerEndpoint: HelperPeerEndpoint { get async }
 
+    /// Completes the handshake. Must be called exactly once after construction,
+    /// after any business message handlers have been installed via
+    /// `setMessageHandler(...)`. See the conforming type's docs for details.
+    func activate() async throws
+
     /// Send a typed `Request` to the peer. Throws if no peer connection is established
     /// yet, or the underlying XPC connection fails.
     @discardableResult

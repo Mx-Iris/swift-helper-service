@@ -8,16 +8,34 @@ import FoundationToolbox
 /// Peer that participates in a brokered XPC topology as the *server* (the one that
 /// fetches the peer's endpoint from the broker, opens a direct reverse connection,
 /// and registers its own endpoint for later host-side reconnects).
+///
+/// ## Two-phase lifecycle
+///
+/// `init` only constructs the listener, broker connection, and the lib-internal
+/// handshake handlers (PingRequest + ClientReconnectedNotification). It does
+/// **not** activate the listener, open the reverse connection, send
+/// `ServerLaunchedNotification`, or register the endpoint with the broker.
+/// This lets callers install their own business message handlers on the
+/// listener via `setMessageHandler(...)` *before* the peer (client) is told
+/// the server is ready — eliminating a race where the host would send business
+/// requests to the server before the server's handlers are wired up.
+///
+/// Call `activate()` once the business handlers are installed. The peer then
+/// fetches the client endpoint, opens the reverse connection, registers its
+/// own endpoint with the broker, sends `ServerLaunched`, activates the
+/// listener, and transitions to `.connected`.
 @Loggable
 public actor HelperPeerServer: PeerConnection {
     public enum Error: LocalizedError {
         case peerNotConnected
         case cancelled
+        case alreadyActivated
 
         public var errorDescription: String? {
             switch self {
             case .peerNotConnected: return "Peer connection not established"
             case .cancelled: return "Peer was cancelled"
+            case .alreadyActivated: return "Peer was already activated"
             }
         }
     }
@@ -34,8 +52,17 @@ public actor HelperPeerServer: PeerConnection {
 
     private var isCancelled: Bool = false
 
+    private var hasActivated: Bool = false
+
+    private let pendingActivation: PendingActivation
+
     public nonisolated var listenerEndpoint: HelperPeerEndpoint {
         get async { HelperPeerEndpoint(listener.endpoint) }
+    }
+
+    private struct PendingActivation {
+        let machServiceName: String
+        let identifier: String
     }
 
     public init(
@@ -61,32 +88,42 @@ public actor HelperPeerServer: PeerConnection {
         self.serviceConnection = serviceConnection
 
         self.peerConnection = nil
+        self.pendingActivation = PendingActivation(machServiceName: machServiceName, identifier: identifier)
 
         await wireListenerHandlers()
         let handlerAdapter = XPCHelperHandler(listener: listener)
         for service in services {
             await service.setupHandler(handlerAdapter)
         }
+    }
+
+    /// Completes the handshake. Must be called exactly once after construction.
+    public func activate() async throws {
+        guard !hasActivated else { throw Error.alreadyActivated }
+        hasActivated = true
 
         let peerConnection: SwiftyXPC.XPCConnection
         do {
             try await serviceConnection.pingHelperTool()
-            let clientEndpoint = try await serviceConnection.fetchEndpoint(machServiceName: machServiceName, identifier: identifier)
+            let clientEndpoint = try await serviceConnection.fetchEndpoint(machServiceName: pendingActivation.machServiceName, identifier: pendingActivation.identifier)
             peerConnection = try SwiftyXPC.XPCConnection(type: .remoteServiceFromEndpoint(clientEndpoint))
             peerConnection.activate()
             try await peerConnection.pingHelperTool()
+            // Activate the listener BEFORE the peer is told the server is
+            // ready, so the host's immediate follow-up requests arrive at a
+            // live listener with handlers in place.
+            listener.activate()
             try await peerConnection.sendMessage(request: ServerLaunchedNotification(endpoint: HelperPeerEndpoint(listener.endpoint)))
             // Re-register own listener endpoint so the host can directly reconnect later.
-            try await serviceConnection.registerEndpoint(listener.endpoint, machServiceName: machServiceName, identifier: identifier)
+            try await serviceConnection.registerEndpoint(listener.endpoint, machServiceName: pendingActivation.machServiceName, identifier: pendingActivation.identifier)
         } catch {
-            capturedContinuation.yield(.disconnected(error))
+            stateContinuation.yield(.disconnected(error))
             throw error
         }
 
         self.peerConnection = peerConnection
         configureErrorHandlers()
-        listener.activate()
-        capturedContinuation.yield(.connected)
+        stateContinuation.yield(.connected)
     }
 
     // MARK: - PeerConnection
