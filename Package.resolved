@@ -1,22 +1,13 @@
 {
-  "originHash" : "4c3f13a52e5e08ebabaadc0c5447c3eed6a0ffcaf98fbaefd1fbc91bdcaf12e2",
+  "originHash" : "69491ecdc3fef5af0614cfd3cbda250170de18585dc2d4d633102cd229c3931d",
   "pins" : [
-    {
-      "identity" : "launchservicesprivate",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/MxIris-Reverse-Engineering/LaunchServicesPrivate",
-      "state" : {
-        "branch" : "main",
-        "revision" : "80d52a34fed345c3e0852a4c6434f08076c103bf"
-      }
-    },
     {
       "identity" : "machinjector",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/MxIris-Reverse-Engineering/MachInjector",
       "state" : {
         "branch" : "main",
-        "revision" : "9cab5f30b0dd935a78ce78a5104fefdfd5606a34"
+        "revision" : "26c6e80b487a554782e5aa07a418dc6ed7f66f4d"
       }
     },
     {
@@ -25,7 +16,7 @@
       "location" : "https://github.com/MxIris-macOS-Library-Forks/SwiftyXPC",
       "state" : {
         "branch" : "main",
-        "revision" : "6735c52ce0c5715991ee7d00ba642c52566b415a"
+        "revision" : "24224400130aa5c6d6c670d32814094386242baa"
       }
     }
   ],

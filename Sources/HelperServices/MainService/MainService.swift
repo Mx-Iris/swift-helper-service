@@ -6,6 +6,8 @@ import HelperCommunication
 package actor MainService: HelperService {
     private var endpointByInfo: [HelperServerInfo: SwiftyXPC.XPCEndpoint] = [:]
 
+    private let version: String
+
     public enum Error: LocalizedError {
         case selfDidDealloc
         case notFound
@@ -31,7 +33,13 @@ package actor MainService: HelperService {
         return .empty
     }
 
-    public init() {}
+    private func fetchVersion(request: FetchVersionRequest) async throws -> FetchVersionRequest.Response {
+        return .init(version: version)
+    }
+
+    package init(version: String) {
+        self.version = version
+    }
 
     public func setupHandler(_ handler: some HelperHandler) async {
         handler.setMessageHandler { [weak self] (request: ListServerInfosRequest) -> ListServerInfosRequest.Response in
@@ -49,6 +57,10 @@ package actor MainService: HelperService {
         handler.setMessageHandler { [weak self] (request: FetchEndpointRequest) -> FetchEndpointRequest.Response in
             guard let self else { throw Error.selfDidDealloc }
             return try await fetchEndpoint(request: request)
+        }
+        handler.setMessageHandler { [weak self] (request: FetchVersionRequest) -> FetchVersionRequest.Response in
+            guard let self else { throw Error.selfDidDealloc }
+            return try await fetchVersion(request: request)
         }
     }
 

@@ -8,6 +8,10 @@ let package = Package(
     platforms: [.macOS(.v11), .macCatalyst(.v14)],
     products: [
         .library(
+            name: "HelperCommunication",
+            targets: ["HelperCommunication"]
+        ),
+        .library(
             name: "HelperService",
             targets: ["HelperService"]
         ),
@@ -18,6 +22,10 @@ let package = Package(
         .library(
             name: "HelperServer",
             targets: ["HelperServer"]
+        ),
+        .library(
+            name: "HelperPeer",
+            targets: ["HelperPeer"]
         ),
         .library(
             name: "InjectionService",
@@ -80,6 +88,14 @@ let package = Package(
             ]
         ),
         .target(
+            name: "HelperPeer",
+            dependencies: [
+                "HelperCommunication",
+                "HelperService",
+                .product(name: "SwiftyXPC", package: "SwiftyXPC"),
+            ]
+        ),
+        .target(
             name: "MainService",
             dependencies: [
                 "HelperCommunication",
@@ -136,6 +152,14 @@ let package = Package(
                 "HelperCommunication",
             ],
             path: "Sources/HelperServices/FilesService/Implementation"
+        ),
+        .testTarget(
+            name: "HelperCommunicationTests",
+            dependencies: [
+                "HelperCommunication",
+                "HelperClient",
+                .product(name: "SwiftyXPC", package: "SwiftyXPC"),
+            ]
         ),
     ]
 )

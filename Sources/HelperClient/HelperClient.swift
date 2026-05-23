@@ -76,6 +76,15 @@ public actor HelperClient {
         return try await serverConnection.sendMessage(request: request)
     }
 
+    /// Fetches the version reported by the tool's `MainService`. Throws `Error.invalidConnection` if
+    /// `connectToTool` has not been called yet, or rethrows the underlying `XPCConnection.Error` if
+    /// the tool fails to respond (use `XPCConnection.Error.indicatesOutdatedPeer` to distinguish
+    /// "tool predates version query" from transient XPC failures).
+    public func fetchToolVersion() async throws -> String {
+        guard let toolConnection else { throw Error.invalidConnection }
+        return try await toolConnection.sendMessage(request: FetchVersionRequest()).version
+    }
+
     public func installTool(name: String) async throws {
 //        guard await !isConnectedToTool else { throw Error.message("Helper already installed") }
         func executeAuthorizationFunction(_ authorizationFunction: () -> (OSStatus)) throws {
