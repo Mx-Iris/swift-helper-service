@@ -2,7 +2,7 @@
 import Foundation
 public import HelperCommunication
 import HelperService
-@preconcurrency internal import SwiftyXPC
+@preconcurrency private import SwiftyXPC
 import FoundationToolbox
 
 /// Peer that participates in a brokered XPC topology as the *server* (the one that
