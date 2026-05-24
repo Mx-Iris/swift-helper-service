@@ -53,8 +53,8 @@ let package = Package(
         ),
     ],
     dependencies: [
-        .package(url: "https://github.com/MxIris-macOS-Library-Forks/SwiftyXPC", branch: "main"),
-        .package(url: "https://github.com/MxIris-Reverse-Engineering/MachInjector", branch: "main"),
+        .package(url: "https://github.com/MxIris-macOS-Library-Forks/SwiftyXPC", from: "0.5.101"),
+        .package(url: "https://github.com/MxIris-Reverse-Engineering/MachInjector", from: "0.2.0"),
         .package(url: "https://github.com/Mx-Iris/FrameworkToolbox", from: "0.5.5"),
     ],
     targets: [
@@ -109,15 +109,6 @@ let package = Package(
             ],
             path: "Sources/HelperServices/MainService"
         ),
-//        .target(
-//            name: "InjectionService",
-//            dependencies: [
-//                "HelperCommunication",
-//                "HelperService",
-//                .product(name: "MachInjector", package: "MachInjector"),
-//            ],
-//            path: "Sources/HelperServices/InjectionService"
-//        ),
         .target(
             name: "InjectionServiceInterface",
             dependencies: [
@@ -135,14 +126,6 @@ let package = Package(
             ],
             path: "Sources/HelperServices/InjectionService/Implementation"
         ),
-//        .target(
-//            name: "FilesService",
-//            dependencies: [
-//                "HelperService",
-//                "HelperCommunication",
-//            ],
-//            path: "Sources/HelperServices/FilesService"
-//        ),
         .target(
             name: "FilesServiceInterface",
             dependencies: [
