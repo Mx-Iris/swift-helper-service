@@ -1,3 +1,4 @@
+#if os(macOS) || targetEnvironment(macCatalyst)
 import Foundation
 import HelperCommunication
 import ServiceManagement
@@ -84,37 +85,5 @@ public actor HelperClient {
         guard let toolConnection else { throw Error.invalidConnection }
         return try await toolConnection.sendMessage(request: FetchVersionRequest()).version
     }
-
-    public func installTool(name: String) async throws {
-//        guard await !isConnectedToTool else { throw Error.message("Helper already installed") }
-        func executeAuthorizationFunction(_ authorizationFunction: () -> (OSStatus)) throws {
-            let osStatus = authorizationFunction()
-            guard osStatus == errAuthorizationSuccess else {
-                throw Error.message(String(describing: SecCopyErrorMessageString(osStatus, nil)))
-            }
-        }
-
-        func authorizationRef(
-            _ rights: UnsafePointer<AuthorizationRights>?,
-            _ environment: UnsafePointer<AuthorizationEnvironment>?,
-            _ flags: AuthorizationFlags
-        ) throws -> AuthorizationRef? {
-            var authRef: AuthorizationRef?
-            try executeAuthorizationFunction { AuthorizationCreate(rights, environment, flags, &authRef) }
-            return authRef
-        }
-        var cfError: Unmanaged<CFError>?
-
-        var authItem: AuthorizationItem = kSMRightBlessPrivilegedHelper.withCString {
-            AuthorizationItem(name: $0, valueLength: 0, value: UnsafeMutableRawPointer(bitPattern: 0), flags: 0)
-        }
-
-        var authRights = AuthorizationRights(count: 1, items: withUnsafeMutablePointer(to: &authItem) { $0 })
-
-        let authRef = try authorizationRef(&authRights, nil, [.interactionAllowed, .extendRights, .preAuthorize])
-        SMJobBless(kSMDomainSystemLaunchd, name as CFString, authRef, &cfError)
-        if let error = cfError?.takeRetainedValue() {
-            throw error
-        }
-    }
 }
+#endif

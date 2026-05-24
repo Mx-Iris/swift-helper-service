@@ -1,4 +1,4 @@
-#if canImport(AppKit) && !targetEnvironment(macCatalyst)
+#if os(macOS) || targetEnvironment(macCatalyst)
 import Foundation
 import HelperCommunication
 @preconcurrency package import SwiftyXPC

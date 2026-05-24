@@ -1,3 +1,4 @@
+#if os(macOS) || targetEnvironment(macCatalyst)
 import Foundation
 import HelperService
 import MachInjector
@@ -14,3 +15,4 @@ public actor InjectionService: HelperService {
 
     public func run() async throws {}
 }
+#endif

@@ -1,8 +1,8 @@
-#if canImport(AppKit) && !targetEnvironment(macCatalyst)
+#if os(macOS) || targetEnvironment(macCatalyst)
 import Foundation
 import ServiceManagement
 
-@available(macOS 13, *)
+@available(macOS 13.0, macCatalyst 16.0, *)
 public actor SMAppServiceDaemonInstaller {
     private let daemon: SMAppService
 
@@ -50,7 +50,7 @@ public actor SMAppServiceDaemonInstaller {
     }
 }
 
-@available(macOS 13, *)
+@available(macOS 13.0, macCatalyst 16.0, *)
 extension HelperClient {
     /// Factory for an `SMAppServiceDaemonInstaller` that installs the tool via the modern
     /// `SMAppService.daemon(plistName:)` API. The legacy `installTool(name:)` SMJobBless path is

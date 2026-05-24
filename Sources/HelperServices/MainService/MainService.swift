@@ -1,3 +1,4 @@
+#if os(macOS) || targetEnvironment(macCatalyst)
 import Foundation
 import HelperService
 import HelperCommunication
@@ -66,3 +67,4 @@ package actor MainService: HelperService {
 
     public func run() async throws {}
 }
+#endif

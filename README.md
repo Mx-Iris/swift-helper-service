@@ -1,13 +1,13 @@
 # swift-helper-service
 
-A Swift Package that eliminates boilerplate when building a macOS **privileged helper tool** installed via `SMJobBless` or the modern `SMAppService.daemon(plistName:)` API. It layers a typed, `async/await`-friendly request/response framework on top of [SwiftyXPC](https://github.com/MxIris-macOS-Library-Forks/SwiftyXPC), plus a discovery/endpoint-registry pattern so a single privileged helper can broker connections to any number of additional XPC servers — and a brokered peer-to-peer topology for processes that need to talk through the helper without the helper sitting in the middle of every message.
+A Swift Package that eliminates boilerplate when building a macOS **privileged helper tool** installed via `SMAppService.daemon(plistName:)`. It layers a typed, `async/await`-friendly request/response framework on top of [SwiftyXPC](https://github.com/MxIris-macOS-Library-Forks/SwiftyXPC), plus a discovery/endpoint-registry pattern so a single privileged helper can broker connections to any number of additional XPC servers — and a brokered peer-to-peer topology for processes that need to talk through the helper without the helper sitting in the middle of every message.
 
 ## Why?
 
 Writing a privileged helper on macOS traditionally means:
 
 - Hand-rolling untyped `xpc_object_t` payloads.
-- Reimplementing the `SMJobBless` install dance in every project.
+- Reimplementing the privileged-helper install dance in every project.
 - Wiring up multiple XPC services into a single helper binary by hand.
 - Inventing your own re-connection / endpoint-handoff protocol when one process needs to reverse-connect to another through the helper.
 
@@ -56,7 +56,7 @@ The Interface/Implementation split is the canonical pattern — it keeps heavywe
                        └────────────────────────────┘       └─────────────────┘
 ```
 
-1. **The privileged "tool"** is installed via `SMJobBless` (or `SMAppService.daemon(...)`), runs as `root`, and exposes a `.machService(name:)` `XPCListener`. It always hosts the package-internal `MainService`, which is an *endpoint registry* — not feature logic.
+1. **The privileged "tool"** is installed via `SMAppService.daemon(plistName:)`, runs as `root`, and exposes a `.machService(name:)` `XPCListener`. It always hosts the package-internal `MainService`, which is an *endpoint registry* — not feature logic.
 2. **Zero or more non-privileged "servers"** (`HelperServerType.plain(name, identifier)`) open *anonymous* `XPCListener`s, connect back to the tool, and publish their `XPCEndpoint` into the registry under a `HelperServerInfo`.
 3. **The host app** uses `HelperClient` to connect to the tool, discover sub-servers via `MainService`, and fetch their endpoints to open direct XPC connections.
 
@@ -138,8 +138,10 @@ let server = try await HelperServer(
         InjectionService(),
     ]
 )
-await server.activate()
-RunLoop.main.run()
+// `activateAndRun()` activates the listener and then suspends the Task
+// forever, keeping the daemon alive. If the surrounding code already drives
+// the process's lifecycle, call `activate()` directly and skip `run()`.
+await server.activateAndRun()
 ```
 
 `MainService` is added automatically — do **not** register it yourself.
@@ -152,10 +154,6 @@ import MyServiceInterface
 
 let client = HelperClient()
 
-// Legacy SMJobBless install:
-try await client.installTool(name: "com.example.HelperTool")
-
-// Or the modern installer (macOS 13+):
 if #available(macOS 13, *) {
     let installer = client.daemonInstaller(plistName: "com.example.HelperTool.plist")
     try await installer.register()
@@ -210,16 +208,9 @@ do {
 
 This wraps the SwiftyXPC-specific check so callers don't need to import or pattern-match `SwiftyXPC.XPCConnection.Error` directly.
 
-## Installation flows
+## Installation
 
-Two install flows coexist; pick whichever matches your deployment target:
-
-| API                                        | Availability    | Notes                                                                                       |
-| ------------------------------------------ | --------------- | ------------------------------------------------------------------------------------------- |
-| `HelperClient.installTool(name:)`          | All supported   | Legacy `SMJobBless` path. Still required for older clients.                                 |
-| `HelperClient.daemonInstaller(plistName:)` | macOS 13+       | Returns an `SMAppServiceDaemonInstaller` actor wrapping `SMAppService.daemon(plistName:)`. |
-
-`SMAppServiceDaemonInstaller` exposes `register()` / `unregister()` / `refresh()` / `openLoginItemsSettings()` and a poll-free `statusStream: AsyncStream<SMAppService.Status>` that yields on every state-mutating call.
+`HelperClient.daemonInstaller(plistName:)` (`@available(macOS 13, *)`) returns an `SMAppServiceDaemonInstaller` actor wrapping `SMAppService.daemon(plistName:)`. It exposes `register()` / `unregister()` / `refresh()` / `openLoginItemsSettings()` and a poll-free `statusStream: AsyncStream<SMAppService.Status>` that yields on every state-mutating call.
 
 ## Brokered peer topology (`HelperPeer`)
 

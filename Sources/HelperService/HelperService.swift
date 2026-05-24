@@ -1,3 +1,4 @@
+#if os(macOS) || targetEnvironment(macCatalyst)
 import HelperCommunication
 
 public protocol HelperService: Sendable {
@@ -14,3 +15,4 @@ public enum HelperServerType: Sendable {
     case plain(name: String, identifier: String)
     case machService(name: String)
 }
+#endif

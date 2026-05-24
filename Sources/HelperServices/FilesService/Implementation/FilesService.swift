@@ -1,3 +1,4 @@
+#if os(macOS) || targetEnvironment(macCatalyst)
 import Foundation
 import HelperService
 import HelperCommunication
@@ -29,3 +30,4 @@ public actor FilesService: HelperService {
 
     public func run() async throws {}
 }
+#endif

@@ -1,3 +1,4 @@
+#if os(macOS) || targetEnvironment(macCatalyst)
 import Foundation
 
 public enum PeerConnectionState: Sendable {
@@ -6,3 +7,4 @@ public enum PeerConnectionState: Sendable {
     case disconnected(any Error)
     case cancelled
 }
+#endif

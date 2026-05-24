@@ -1,3 +1,4 @@
+#if os(macOS) || targetEnvironment(macCatalyst)
 import Foundation
 
 public protocol Request<Response>: Codable, Sendable {
@@ -11,3 +12,4 @@ public struct VoidResponse: Codable, Sendable {
 
     public static let empty: VoidResponse = .init()
 }
+#endif

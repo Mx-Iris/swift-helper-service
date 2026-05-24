@@ -1,3 +1,4 @@
+#if os(macOS) || targetEnvironment(macCatalyst)
 import Foundation
 @preconcurrency internal import SwiftyXPC
 
@@ -23,3 +24,4 @@ package actor HelperTool {
         self.connection = connection
     }
 }
+#endif
