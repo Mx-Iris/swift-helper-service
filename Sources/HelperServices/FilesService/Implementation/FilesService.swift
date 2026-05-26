@@ -20,6 +20,10 @@ public actor FilesService: HelperService {
                 if fileManager.fileExists(atPath: to.path) {
                     try fileManager.removeItem(at: to)
                 }
+                let parentDirectory = to.deletingLastPathComponent()
+                if !fileManager.fileExists(atPath: parentDirectory.path) {
+                    try fileManager.createDirectory(at: parentDirectory, withIntermediateDirectories: true)
+                }
                 try fileManager.copyItem(at: from, to: to)
             case let .write(url: url, data: data):
                 try data.write(to: url)
