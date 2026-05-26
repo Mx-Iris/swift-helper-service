@@ -5,7 +5,7 @@ import HelperCommunication
 public struct InjectApplicationRequest: Codable, Request {
     public typealias Response = VoidResponse
 
-    public static let identifier: String = "com.JH.HelperCommunication.InjectApplication"
+    public static let identifier: String = "com.JH.HelperService.InjectionService.InjectApplication"
 
     public let pid: pid_t
 
