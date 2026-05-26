@@ -51,6 +51,30 @@ let package = Package(
             name: "FilesServiceImplementation",
             targets: ["FilesServiceImplementation"]
         ),
+        .library(
+            name: "ApplicationsService",
+            targets: ["ApplicationsServiceInterface", "ApplicationsServiceImplementation"]
+        ),
+        .library(
+            name: "ApplicationsServiceInterface",
+            targets: ["ApplicationsServiceInterface"]
+        ),
+        .library(
+            name: "ApplicationsServiceImplementation",
+            targets: ["ApplicationsServiceImplementation"]
+        ),
+        .library(
+            name: "InjectedEndpointRegistryService",
+            targets: ["InjectedEndpointRegistryServiceInterface", "InjectedEndpointRegistryServiceImplementation"]
+        ),
+        .library(
+            name: "InjectedEndpointRegistryServiceInterface",
+            targets: ["InjectedEndpointRegistryServiceInterface"]
+        ),
+        .library(
+            name: "InjectedEndpointRegistryServiceImplementation",
+            targets: ["InjectedEndpointRegistryServiceImplementation"]
+        ),
     ],
     dependencies: [
         .package(url: "https://github.com/MxIris-macOS-Library-Forks/SwiftyXPC", from: "0.5.102"),
@@ -141,6 +165,38 @@ let package = Package(
                 "HelperCommunication",
             ],
             path: "Sources/HelperServices/FilesService/Implementation"
+        ),
+        .target(
+            name: "ApplicationsServiceInterface",
+            dependencies: [
+                "HelperCommunication",
+            ],
+            path: "Sources/HelperServices/ApplicationsService/Interface"
+        ),
+        .target(
+            name: "ApplicationsServiceImplementation",
+            dependencies: [
+                "ApplicationsServiceInterface",
+                "HelperService",
+                "HelperCommunication",
+            ],
+            path: "Sources/HelperServices/ApplicationsService/Implementation"
+        ),
+        .target(
+            name: "InjectedEndpointRegistryServiceInterface",
+            dependencies: [
+                "HelperCommunication",
+            ],
+            path: "Sources/HelperServices/InjectedEndpointRegistryService/Interface"
+        ),
+        .target(
+            name: "InjectedEndpointRegistryServiceImplementation",
+            dependencies: [
+                "InjectedEndpointRegistryServiceInterface",
+                "HelperService",
+                "HelperCommunication",
+            ],
+            path: "Sources/HelperServices/InjectedEndpointRegistryService/Implementation"
         ),
         .testTarget(
             name: "HelperCommunicationTests",
