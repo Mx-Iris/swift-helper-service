@@ -14,6 +14,25 @@ public actor InjectionService: HelperService {
             }
             return .empty
         }
+
+        handler.setMessageHandler { (request: InjectApplicationViaRemapRequest) -> InjectApplicationViaRemapRequest.Response in
+            guard #available(macOS 11.0, *) else {
+                throw NSError(
+                    domain: "com.JH.HelperService.InjectionService",
+                    code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "MachInjectorRemap requires macOS 11.0 or later."]
+                )
+            }
+            // Same main-thread task_for_pid constraint as the dlopen path.
+            try await MainActor.run {
+                try MachInjectorRemap.inject(
+                    pid: request.pid,
+                    payloadPath: request.payloadURL.path,
+                    entrySymbol: request.entrySymbol
+                )
+            }
+            return .empty
+        }
     }
 
     public func run() async throws {}

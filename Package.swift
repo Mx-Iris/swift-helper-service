@@ -78,7 +78,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/MxIris-macOS-Library-Forks/SwiftyXPC", from: "0.5.102"),
-        .package(url: "https://github.com/MxIris-Reverse-Engineering/MachInjector", from: "0.3.0"),
+        .package(url: "https://github.com/MxIris-Reverse-Engineering/MachInjector", from: "0.4.0"),
         .package(url: "https://github.com/Mx-Iris/FrameworkToolbox", from: "0.5.5"),
     ],
     targets: [
