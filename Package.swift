@@ -2,6 +2,81 @@
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
+import Foundation
+
+let localEnvironment: [String: String] = {
+    let localEnvironmentFilePath = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .appendingPathComponent(".package.env")
+        .path
+    guard FileManager.default.fileExists(atPath: localEnvironmentFilePath),
+          let contents = try? String(contentsOfFile: localEnvironmentFilePath, encoding: .utf8)
+    else {
+        return [:]
+    }
+    var environment: [String: String] = [:]
+    for line in contents.components(separatedBy: .newlines) {
+        let trimmedLine = line.trimmingCharacters(in: .whitespaces)
+        if trimmedLine.isEmpty || trimmedLine.hasPrefix("#") {
+            continue
+        }
+        let parts = trimmedLine.split(separator: "=", maxSplits: 1)
+        guard parts.count == 2 else { continue }
+        let key = parts[0].trimmingCharacters(in: .whitespaces)
+        let value = parts[1].trimmingCharacters(in: .whitespaces)
+        environment[key] = value
+    }
+    return environment
+}()
+
+func envEnable(_ key: String, default defaultValue: Bool = false) -> Bool {
+    let value = localEnvironment[key] ?? Context.environment[key]
+    guard let value else {
+        return defaultValue
+    }
+    if value == "1" {
+        return true
+    } else if value == "0" {
+        return false
+    } else {
+        return defaultValue
+    }
+}
+
+let usingLocalDependencies = envEnable("USING_LOCAL_DEPENDENCIES")
+
+extension Package.Dependency {
+    enum LocalSearchPath {
+        case package(path: String, isRelative: Bool, isEnabled: Bool = usingLocalDependencies, traits: Set<PackageDescription.Package.Dependency.Trait> = [.defaults])
+    }
+
+    static func package(local localSearchPaths: LocalSearchPath..., remote: Package.Dependency) -> Package.Dependency {
+        let currentFilePath = #filePath
+        let isClonedDependency = currentFilePath.contains("/checkouts/") ||
+            currentFilePath.contains("/SourcePackages/") ||
+            currentFilePath.contains("/.build/")
+
+        if isClonedDependency {
+            return remote
+        }
+        for local in localSearchPaths {
+            switch local {
+            case .package(let path, let isRelative, let isEnabled, let traits):
+                guard isEnabled else { continue }
+                let url = if isRelative {
+                    URL(fileURLWithPath: path, relativeTo: URL(fileURLWithPath: #filePath))
+                } else {
+                    URL(fileURLWithPath: path)
+                }
+
+                if FileManager.default.fileExists(atPath: url.path) {
+                    return .package(path: url.path, traits: traits)
+                }
+            }
+        }
+        return remote
+    }
+}
 
 let package = Package(
     name: "swift-helper-service",
@@ -9,77 +84,93 @@ let package = Package(
     products: [
         .library(
             name: "HelperCommunication",
-            targets: ["HelperCommunication"]
+            targets: ["HelperCommunication"],
         ),
         .library(
             name: "HelperService",
-            targets: ["HelperService"]
+            targets: ["HelperService"],
         ),
         .library(
             name: "HelperClient",
-            targets: ["HelperClient"]
+            targets: ["HelperClient"],
         ),
         .library(
             name: "HelperServer",
-            targets: ["HelperServer"]
+            targets: ["HelperServer"],
         ),
         .library(
             name: "HelperPeer",
-            targets: ["HelperPeer"]
+            targets: ["HelperPeer"],
         ),
         .library(
             name: "InjectionService",
-            targets: ["InjectionServiceInterface", "InjectionServiceImplementation"]
+            targets: ["InjectionServiceInterface", "InjectionServiceImplementation"],
         ),
         .library(
             name: "InjectionServiceInterface",
-            targets: ["InjectionServiceInterface"]
+            targets: ["InjectionServiceInterface"],
         ),
         .library(
             name: "InjectionServiceImplementation",
-            targets: ["InjectionServiceImplementation"]
+            targets: ["InjectionServiceImplementation"],
         ),
         .library(
             name: "FilesService",
-            targets: ["FilesServiceInterface", "FilesServiceImplementation"]
+            targets: ["FilesServiceInterface", "FilesServiceImplementation"],
         ),
         .library(
             name: "FilesServiceInterface",
-            targets: ["FilesServiceInterface"]
+            targets: ["FilesServiceInterface"],
         ),
         .library(
             name: "FilesServiceImplementation",
-            targets: ["FilesServiceImplementation"]
+            targets: ["FilesServiceImplementation"],
         ),
         .library(
             name: "ApplicationsService",
-            targets: ["ApplicationsServiceInterface", "ApplicationsServiceImplementation"]
+            targets: ["ApplicationsServiceInterface", "ApplicationsServiceImplementation"],
         ),
         .library(
             name: "ApplicationsServiceInterface",
-            targets: ["ApplicationsServiceInterface"]
+            targets: ["ApplicationsServiceInterface"],
         ),
         .library(
             name: "ApplicationsServiceImplementation",
-            targets: ["ApplicationsServiceImplementation"]
+            targets: ["ApplicationsServiceImplementation"],
         ),
         .library(
             name: "InjectedEndpointRegistryService",
-            targets: ["InjectedEndpointRegistryServiceInterface", "InjectedEndpointRegistryServiceImplementation"]
+            targets: ["InjectedEndpointRegistryServiceInterface", "InjectedEndpointRegistryServiceImplementation"],
         ),
         .library(
             name: "InjectedEndpointRegistryServiceInterface",
-            targets: ["InjectedEndpointRegistryServiceInterface"]
+            targets: ["InjectedEndpointRegistryServiceInterface"],
         ),
         .library(
             name: "InjectedEndpointRegistryServiceImplementation",
-            targets: ["InjectedEndpointRegistryServiceImplementation"]
+            targets: ["InjectedEndpointRegistryServiceImplementation"],
         ),
     ],
     dependencies: [
-        .package(url: "https://github.com/MxIris-macOS-Library-Forks/SwiftyXPC", from: "0.5.102"),
-        .package(url: "https://github.com/MxIris-Reverse-Engineering/MachInjector", from: "0.4.0"),
-        .package(url: "https://github.com/Mx-Iris/FrameworkToolbox", from: "0.5.5"),
+        .package(
+            url: "https://github.com/MxIris-macOS-Library-Forks/SwiftyXPC",
+            from: "0.5.103",
+        ),
+        .package(
+            local: .package(
+                path: "/Volumes/Repositories/Private/Personal/Library/macOS/MachInjector",
+                isRelative: false,
+                isEnabled: true,
+            ),
+            remote: .package(
+                url: "https://github.com/MxIris-Reverse-Engineering/MachInjector",
+                from: "0.4.1",
+            ),
+        ),
+        .package(
+            url: "https://github.com/Mx-Iris/FrameworkToolbox",
+            from: "0.7.4",
+        ),
     ],
     targets: [
         .target(
@@ -88,14 +179,14 @@ let package = Package(
                 "HelperCommunication",
                 .product(name: "SwiftyXPC", package: "SwiftyXPC"),
                 .product(name: "FoundationToolbox", package: "FrameworkToolbox"),
-            ]
+            ],
         ),
         .target(
             name: "HelperCommunication",
             dependencies: [
                 .product(name: "SwiftyXPC", package: "SwiftyXPC"),
                 .product(name: "FoundationToolbox", package: "FrameworkToolbox"),
-            ]
+            ],
         ),
         .target(
             name: "HelperClient",
@@ -104,7 +195,7 @@ let package = Package(
                 "HelperCommunication",
                 .product(name: "SwiftyXPC", package: "SwiftyXPC"),
                 .product(name: "FoundationToolbox", package: "FrameworkToolbox"),
-            ]
+            ],
         ),
         .target(
             name: "HelperServer",
@@ -114,7 +205,7 @@ let package = Package(
                 "MainService",
                 .product(name: "SwiftyXPC", package: "SwiftyXPC"),
                 .product(name: "FoundationToolbox", package: "FrameworkToolbox"),
-            ]
+            ],
         ),
         .target(
             name: "HelperPeer",
@@ -123,7 +214,7 @@ let package = Package(
                 "HelperService",
                 .product(name: "SwiftyXPC", package: "SwiftyXPC"),
                 .product(name: "FoundationToolbox", package: "FrameworkToolbox"),
-            ]
+            ],
         ),
         .target(
             name: "MainService",
@@ -131,14 +222,14 @@ let package = Package(
                 "HelperCommunication",
                 "HelperService",
             ],
-            path: "Sources/HelperServices/MainService"
+            path: "Sources/HelperServices/MainService",
         ),
         .target(
             name: "InjectionServiceInterface",
             dependencies: [
                 "HelperCommunication",
             ],
-            path: "Sources/HelperServices/InjectionService/Interface"
+            path: "Sources/HelperServices/InjectionService/Interface",
         ),
         .target(
             name: "InjectionServiceImplementation",
@@ -148,14 +239,14 @@ let package = Package(
                 "HelperService",
                 .product(name: "MachInjector", package: "MachInjector"),
             ],
-            path: "Sources/HelperServices/InjectionService/Implementation"
+            path: "Sources/HelperServices/InjectionService/Implementation",
         ),
         .target(
             name: "FilesServiceInterface",
             dependencies: [
                 "HelperCommunication",
             ],
-            path: "Sources/HelperServices/FilesService/Interface"
+            path: "Sources/HelperServices/FilesService/Interface",
         ),
         .target(
             name: "FilesServiceImplementation",
@@ -164,14 +255,14 @@ let package = Package(
                 "HelperService",
                 "HelperCommunication",
             ],
-            path: "Sources/HelperServices/FilesService/Implementation"
+            path: "Sources/HelperServices/FilesService/Implementation",
         ),
         .target(
             name: "ApplicationsServiceInterface",
             dependencies: [
                 "HelperCommunication",
             ],
-            path: "Sources/HelperServices/ApplicationsService/Interface"
+            path: "Sources/HelperServices/ApplicationsService/Interface",
         ),
         .target(
             name: "ApplicationsServiceImplementation",
@@ -180,14 +271,14 @@ let package = Package(
                 "HelperService",
                 "HelperCommunication",
             ],
-            path: "Sources/HelperServices/ApplicationsService/Implementation"
+            path: "Sources/HelperServices/ApplicationsService/Implementation",
         ),
         .target(
             name: "InjectedEndpointRegistryServiceInterface",
             dependencies: [
                 "HelperCommunication",
             ],
-            path: "Sources/HelperServices/InjectedEndpointRegistryService/Interface"
+            path: "Sources/HelperServices/InjectedEndpointRegistryService/Interface",
         ),
         .target(
             name: "InjectedEndpointRegistryServiceImplementation",
@@ -196,7 +287,7 @@ let package = Package(
                 "HelperService",
                 "HelperCommunication",
             ],
-            path: "Sources/HelperServices/InjectedEndpointRegistryService/Implementation"
+            path: "Sources/HelperServices/InjectedEndpointRegistryService/Implementation",
         ),
         .testTarget(
             name: "HelperCommunicationTests",
@@ -204,7 +295,7 @@ let package = Package(
                 "HelperCommunication",
                 "HelperClient",
                 .product(name: "SwiftyXPC", package: "SwiftyXPC"),
-            ]
+            ],
         ),
-    ]
+    ],
 )
