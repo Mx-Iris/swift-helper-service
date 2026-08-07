@@ -237,9 +237,14 @@ let package = Package(
                 "InjectionServiceInterface",
                 "HelperCommunication",
                 "HelperService",
+                "HelperProcessProbe",
                 .product(name: "MachInjector", package: "MachInjector"),
             ],
             path: "Sources/HelperServices/InjectionService/Implementation",
+        ),
+        .target(
+            name: "HelperProcessProbe",
+            path: "Sources/HelperProcessProbe",
         ),
         .target(
             name: "FilesServiceInterface",
@@ -295,6 +300,12 @@ let package = Package(
                 "HelperCommunication",
                 "HelperClient",
                 .product(name: "SwiftyXPC", package: "SwiftyXPC"),
+            ],
+        ),
+        .testTarget(
+            name: "InjectionServiceTests",
+            dependencies: [
+                "InjectionServiceImplementation",
             ],
         ),
     ],

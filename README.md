@@ -77,7 +77,7 @@ Routing is explicit: `sendToTool(request:)` vs `sendToServer(request:for:)`.
 Two bundled services ship as examples:
 
 - **`FilesService`** — privileged file operations (`createDirectory`, `remove`, `move`, `copy`, `write`).
-- **`InjectionService`** — `dlopen`-style dylib injection into a target PID, backed by [`MachInjector`](https://github.com/MxIris-Reverse-Engineering/MachInjector).
+- **`InjectionService`** — dylib injection into a target PID, backed by [`MachInjector`](https://github.com/MxIris-Reverse-Engineering/MachInjector). The daemon picks the loading path itself: a `dlopen` inside the target, or a `mach_vm_remap` projection for targets that would refuse one (a seatbelt profile denying `file-map-executable`, or AMFI library validation). Clients send a single `InjectApplicationRequest` and do not choose.
 
 ## Quick start
 
