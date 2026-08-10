@@ -264,7 +264,7 @@ The module is intentionally UI-framework-agnostic: no Combine / Observation depe
 
 ## Conventions specific to this repo
 
-- **Module visibility is deliberate.** `package` is preferred for cross-target plumbing, `public` only for what the host app or helper binary calls. The registry request types (`FetchEndpointRequest` / `RegisterEndpointRequest` / `ListServerInfosRequest`) and `HelperServerInfo.init` are intentionally `package` — the public surface for talking to `MainService` is the `XPCConnection+MainService` behaviour extensions (`pingHelperTool` / `registerEndpoint` / `fetchEndpoint` / `listHelperServerInfos`). Don't loosen those request types to `public` — broaden the behaviour extensions instead.
+- **Module visibility is deliberate.** `package` is preferred for cross-target plumbing, `public` only for what the host app or helper binary calls. The registry request types (`FetchEndpointRequest` / `RegisterEndpointRequest` / `ListServerInfosRequest`) and `HelperServerInfo.init` are intentionally `package`: their meaning depends on there being exactly one registry, inside `MainService`. In-package code reaches it through the `XPCConnection+MainService` behaviour extensions (`pingHelperTool` / `registerEndpoint` / `fetchEndpoint` / `listHelperServerInfos`), which are `package` as well; from outside the package, `HelperClient` is the entry point. Don't loosen those request types to `public` — add a behaviour method instead.
 - **Every concrete service is split into two targets.** The Interface target exposes only the `Request`/payload types and depends only on `HelperCommunication`. The Implementation target conforms to `HelperService` and pulls in heavyweight dependencies. Two product names exist per service so a host app can link the minimal dependency set (e.g. `InjectionServiceInterface` only).
 - **Identifier prefixes are reserved.** `HelperCommunication` reserves `com.JH.HelperCommunication.*`, `HelperPeer` reserves `com.JH.HelperPeer.*`, concrete services reserve `com.JH.HelperService.<Name>.*`. Keep the `com.JH.*` prefix for new identifiers unless your project intentionally uses a different namespace.
 - **`MainService` is added automatically** by `HelperServer.init` — do not register it manually, and do not add other services with overlapping request identifiers.
@@ -284,10 +284,27 @@ swift build 2>&1 | xcsift          # or plain `swift build`
 swift test  2>&1 | xcsift          # or plain `swift test`
 ```
 
-The test suite (`HelperCommunicationTests`) covers:
+There are two test targets, and their coverage is narrow — a green run is not evidence that the system works end to end.
 
-- `CodableTests` — `Codable` round-trips for every shared request type plus the `XPCConnection+MainService` behaviour extensions, exercised against an in-process broker.
-- `OutdatedPeerTests` — `HelperClient.errorIndicatesOutdatedPeer(_:)` returns `true` only for `SwiftyXPC.XPCConnection.Error.unexpectedMessage` and `false` for every other error case.
+`HelperCommunicationTests`:
+
+- `CodableTests` — `Codable` round-trips for the shared request types, and a guard that the built-in identifiers stay under the `com.JH.HelperCommunication.*` namespace.
+- `OutdatedPeerTests` — `HelperClient.errorIndicatesOutdatedPeer(_:)` returns `true` only for `SwiftyXPC.XPCConnection.Error.unexpectedMessage` and `false` for every other error, including non-SwiftyXPC ones.
+
+`InjectionServiceTests`:
+
+- `InjectionStrategyTests` — the strategy probes, against live processes minted by re-signing a copy of `/bin/sleep` with and without the `library` code-signing option.
+- `InjectApplicationRequestTests` — wire format: raw-value stability, round-trips, and decoding a payload from a peer that predates `preferredStrategy`.
+
+**Not covered by anything:** `HelperServer`, `HelperClient`, `MainService`, and the entire `HelperPeer` handshake. No test performs a real injection.
+
+## Documentation
+
+- **[`Documentations/Architecture/Overview.md`](Documentations/Architecture/Overview.md)** — why the design is shaped this way: the topology, the module split, the visibility rules, and the known rough edges. Start here; the three sibling documents (`ModuleLayering`, `TypedMessaging`, `BrokeredPeer`) go deeper per area.
+- **[`Documentations/Evolutions/`](Documentations/Evolutions/README.md)** — one proposal per substantive change, with the measurements and the rejected alternatives.
+- **[`CHANGELOG.md`](CHANGELOG.md)** — per-release notes, including source-breaking changes.
+
+These are written in Chinese; the code, this README, and the changelog are in English.
 
 ## Dependencies
 

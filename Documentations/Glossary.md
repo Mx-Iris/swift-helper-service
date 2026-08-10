@@ -22,6 +22,30 @@
 
 按英文名 / 标识符字母序排列。
 
+### broker（引路人）
+
+本项目里特指**特权 tool 在 `HelperPeer` 拓扑中扮演的角色**：它让两个互相找不到对方的非特权进程
+交换 `XPCEndpoint`，交换完成后**退出通信链路** —— 后续消息直连，不经过它。
+
+**不要理解成「消息中转」**。tool 不转发任何业务消息，这正是这套设计的要点：特权进程做介绍人，
+不做中间人。
+
+- **主要出现在**：`Sources/HelperPeer/`
+- **延伸阅读**：[BrokeredPeer.md](Architecture/BrokeredPeer.md)、[Overview.md 第二节](Architecture/Overview.md#二核心决策特权进程只做介绍人不做中间人)
+
+### endpoint registry（端点注册表）
+
+`MainService` 持有的 `[HelperServerInfo: XPCEndpoint]` 字典，是特权 tool 里**唯一**的状态。
+sub-server 和 peer 都往里存自己的匿名监听端点，需要连对方的一方从里面取。
+
+它**不理解任何业务语义** —— 只是键值映射。正因如此，同一张表被 `HelperServer` 的 sub-server 发现
+流程和 `HelperPeer` 的握手流程两种完全不同的用途复用。
+
+**已知局限**：只增不减，进程退出后条目残留。
+
+- **主要出现在**：`Sources/HelperServices/MainService/MainService.swift`
+- **延伸阅读**：[Overview.md 第三节](Architecture/Overview.md#三为什么是端点注册表而不是多个-mach-service)
+
 ### library validation：「请求」与「强制」之别
 
 macOS 的一项代码签名策略：进程只接受 Apple 签名或与自身 Team ID 相同的 dylib。**本项目里必须区分
@@ -58,3 +82,16 @@ macOS 沙箱机制的内部名（`sandbox_check` 等 SPI 属于它）。本项�
 payload 映射为可执行。这是**唯一**仍然直接决定走 remap 路径的判据，因为它可靠且可提前知晓。
 
 - **主要出现在**：`Sources/HelperProcessProbe/HelperProcessProbe.c`
+
+### 两阶段激活（two-phase activation）
+
+`HelperPeerClient` / `HelperPeerServer`（以及 `HelperServer`）刻意把生命周期切成 `init` 和
+`activate()` 两段：**`init` 在线上不做任何动作**，只开监听器、连 broker、装包内部的握手 handler；
+真正的握手在 `activate()` 里发生。
+
+**为什么不能合并**：调用方的业务 handler 只能在 `init` 返回之后才装得上。如果 `init` 就完成握手，
+对方可能在 handler 装好之前就发来第一条业务请求，那条消息会命中一个没有对应 handler 的监听器并被
+**静默丢弃**。这是随调度和负载变化的偶发竞态，开发机上可能永远不复现。
+
+- **主要出现在**：`Sources/HelperPeer/PeerConnection.swift` 的 `activate()` 文档
+- **延伸阅读**：[BrokeredPeer.md 第四节](Architecture/BrokeredPeer.md#四为什么必须是两阶段init-之后还要-activate)
