@@ -279,6 +279,7 @@ let package = Package(
         .testTarget(
             name: "InjectionServiceTests",
             dependencies: [
+                "InjectionServiceInterface",
                 "InjectionServiceImplementation",
             ],
         ),
