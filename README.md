@@ -17,9 +17,11 @@ Writing a privileged helper on macOS traditionally means:
 
 - Swift toolchain **6.2** (`swift-tools-version: 6.2`)
 - macOS **10.15+** / macCatalyst **13+** (per `Package.swift`)
-- A handful of modern-only APIs are gated per-call site:
-  - `SMAppServiceDaemonInstaller` — `@available(macOS 13, *)`
-  - `HelperPeer*` and the `XPCConnection+MainService` behaviour extensions — `#if canImport(AppKit) && !targetEnvironment(macCatalyst)`
+- Newer APIs are gated at the call site rather than by raising the package minimum:
+  - `SMAppServiceDaemonInstaller` — `@available(macOS 13.0, macCatalyst 16.0, *)`
+  - `ApplicationsService` — `@available(macOS 12, *)`
+  - the `mach_vm_remap` injection path — a runtime `#available(macOS 11.0, *)` check
+- Almost every source file is wrapped in `#if os(macOS) || targetEnvironment(macCatalyst)`. Two AppKit-dependent services (`ApplicationsService`, `InjectedEndpointRegistryService`) use a bare `#if os(macOS)`, excluding macCatalyst. The macCatalyst surface is intentionally minimal — it exists so shared code compiles, not as a first-class target.
 
 The library does not bump its minimum platform; gating is per-API via `@available` / `#if`.
 
@@ -61,6 +63,12 @@ The Interface/Implementation split is the canonical pattern — it keeps heavywe
 3. **The host app** uses `HelperClient` to connect to the tool, discover sub-servers via `MainService`, and fetch their endpoints to open direct XPC connections.
 
 Routing is explicit: `sendToTool(request:)` vs `sendToServer(request:for:)`.
+
+**The shape follows from one decision: the privileged process brokers introductions, it is not a middleman.** Everything installed into the tool runs as root, so the tool holds a registry and nothing else; features live in ordinary-privilege processes that publish an endpoint into it. Once the host app has fetched an endpoint it connects *directly* — messages to a sub-server never detour through root. What this buys: only code that genuinely needs privilege gets it, the audited binary the user authorized stays small and rarely needs reinstalling, and there is no forwarding hop in the hot path. What it costs: a discover-fetch-connect handshake instead of a single connection, which `HelperClient` hides but does not remove.
+
+An anonymous listener plus endpoint passing is also why sub-servers do not each need their own mach service: a mach service means a launchd plist and an install step apiece, whereas an `XPCEndpoint` is an ordinary value that travels inside a message.
+
+The reasoning behind this and the other load-bearing decisions is written up in [`Documentations/Architecture/`](Documentations/Architecture/Overview.md).
 
 ### Modules
 
@@ -280,9 +288,14 @@ The module is intentionally UI-framework-agnostic: no Combine / Observation depe
 
 ```bash
 swift package update
-swift build 2>&1 | xcsift          # or plain `swift build`
-swift test  2>&1 | xcsift          # or plain `swift test`
+swift build
+swift test
 ```
+
+> If you pipe through [`xcsift`](https://github.com/ldomaradzki/xcsift) to condense output, do it for
+> `swift build` only. As of 1.0.21 it drops the entire swift-testing result set the moment any test
+> fails and reports `"status": "success"`, and its own exit code is always 0 — so judge test runs by
+> `swift test`'s exit code, never by the summary.
 
 There are two test targets, and their coverage is narrow — a green run is not evidence that the system works end to end.
 

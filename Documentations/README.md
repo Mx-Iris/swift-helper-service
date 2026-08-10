@@ -1,7 +1,7 @@
 # 文档索引
 
 `swift-helper-service` 的内部文档。面向公众的说明在仓库根目录的 [`README.md`](../README.md)，
-面向 agent 的架构速查在 [`CLAUDE.md`](../CLAUDE.md)。
+面向 agent 的架构速查在 [`AGENTS.md`](../AGENTS.md)（`CLAUDE.md` 是指向它的软链）。
 
 **读者假设**：这里的每一篇都假设你不记得这个项目的任何内部细节，包括几个月后的你自己。
 

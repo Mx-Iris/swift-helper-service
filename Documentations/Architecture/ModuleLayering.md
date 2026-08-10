@@ -60,8 +60,9 @@ extension InjectionStrategy {
 
 ## 二、为什么 `HelperService` 是一个只有协议的 target
 
-[`Sources/HelperService/`](../../Sources/HelperService/) 只有三个文件、几十行，定义
-`HelperService`、`HelperHandler`、`HelperServerType`，外加 `XPCHelperHandler` 适配器。
+[`Sources/HelperService/`](../../Sources/HelperService/) 只有两个文件、不到五十行：
+`HelperService.swift`（`HelperService` / `HelperHandler` 两个协议 + `HelperServerType` 枚举）和
+`XPCHelperHandler.swift`（适配器）。
 
 **如果把这些协议直接放进 `HelperServer`**，那么任何想写一个业务服务的模块都得依赖
 `HelperServer` —— 也就是把整个守护进程实现（`XPCListener` 持有、注册表接线、生命周期管理）拖进
@@ -128,7 +129,7 @@ extension SwiftyXPC.XPCConnection {
 包外的宿主 App 走的是 `HelperClient` 上的 `availableServerInfos()` / `connectToServer(info:)`，
 那才是公开入口。
 
-> 仓库根目录的 `CLAUDE.md` 与 `README.md` 一度把这四个方法描述成「public，是与 `MainService` 对话的
+> 仓库根目录的 `AGENTS.md` 与 `README.md` 一度把这四个方法描述成「public，是与 `MainService` 对话的
 > 唯一公开入口」。那是不准确的 —— 已在补写本文时更正。
 
 **要放开怎么办**：如果确实需要给外部新增一种与注册表交互的能力，**加一个新的行为方法**，不要把

@@ -214,7 +214,7 @@ public nonisolated var stateStream: AsyncStream<PeerConnectionState> { get }
   [Overview.md 第八节](Overview.md#八已知粗糙处)）。业务上需要清理的场景目前靠
   `InjectedEndpointRegistryService` 自己用 `DispatchSourceProcess` 监听进程退出解决，`HelperPeer`
   这条线没有对应机制。
-- **`HelperPeer` 没有测试**。仓库根目录 `CLAUDE.md` 一度描述存在 `HelperPeerTests`，以及
+- **`HelperPeer` 没有测试**。仓库根目录 `AGENTS.md` 一度描述存在 `HelperPeerTests`，以及
   `HelperPeerClient`/`HelperPeerServer` 上有 `@_spi(Testing)` 的测试用 init 接受 `toolEndpoint:`
   —— **这两样在源码里都不存在**，已在补写本文时更正。上面所有握手时序都是**读代码得出的，未经
   自动化测试覆盖**。
