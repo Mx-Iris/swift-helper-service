@@ -440,6 +440,50 @@ private static func requireTargetIsStillRunning(pid: pid_t) throws {
 - 要不要配套专题文章
 - 有没有引入新术语
 
+## 验证覆盖与缺口
+
+**「19 个测试全绿」不等于这套逻辑验证过了。** 单元测试验的是选路函数返回什么，**本仓库从未真的
+注入过任何东西** —— 真实注入需要一个以 root 运行的 daemon 和一个真实目标，在单元测试里做不到。
+下面按证据强度分三档，落差要看清楚。
+
+### 一、合成测试覆盖（本仓库自测，`InjectionServiceTests`）
+
+- `initialAttempt` 对「不沙箱但带 `CS_REQUIRE_LV`」的目标返回 `.dlopen`（回归测试，已验证在旧行为
+  下失败）
+- `initialAttempt` 对不带该标志的目标同样返回 `.dlopen`（对照组，证明不是无条件返回 dlopen）
+- `initialAttempt` 对探测不到的 pid 返回 `.machVirtualMemoryRemap`
+- `InjectApplicationRequest` 的 Codable 往返、`InjectionStrategy` raw value 的线格式稳定性、以及
+  不带 `preferredStrategy` 字段的旧客户端能否解码
+
+目标进程由 re-sign 一份 `/bin/sleep` 生成。**这一档只覆盖选路函数的返回值**，不涉及注入本身。
+
+### 二、真实链路覆盖（外部报告，非本仓库自测）
+
+**仅 `dlopen` 主路径**，来源是一个用本库注入 Finder 的下游项目。判定指标不是日志而是耗时差：
+
+> Δ = 宿主 App 记录 `Injected into <pid>` 的时刻 − payload 记录 `Payload attached` 的时刻
+
+之所以能区分路径：`MIMachInjectorRemap` 在 payload 的 pthread 起来之后、`thread_terminate` 之前
+**无条件** `usleep(2000 * 1000)`（`MIMachInjectorRemap.m:1349`），而 `dlopen` 路径没有这段睡眠。
+该下游在 0.1.4 + dlopen 上量到的基线是 **27.3 ms / 11.7 ms**，对照一次 remap 注入是 **2.096 s**。
+
+**这一档的结果尚未取得** —— 该下游需先经其自身的审批流程才会升级。记录在此是为了让将来读到那份
+结果的人知道它的边界：它只能证明「默认路径确实落在 dlopen 且未被悄悄退回 remap」，不构成全链路
+验证。
+
+另注意 Δ ≥ 2 秒**无法**区分「一开始就选了 remap」与「试了 dlopen、被拒、退回 remap」（后者是毫秒级
+拒绝 + 2 秒）。要分辨得看 daemon 侧有没有 dlopen 的 `dlerror` 记录。
+
+### 三、未覆盖（已知缺口）
+
+| 缺口 | 为什么现在验不了 |
+|---|---|
+| `dlopen` 被拒 → 退回 `remap` | 能触发退回的目标需要 `dlopen` 真的被拒绝，而在能用上注入的机器（SIP 关闭）上 `dlopen` 一般是通的；即使造出来，`MachInjectorRemap` 自身还有未修复的 PAC 崩溃在等着 |
+| 存活检查（错误码 `-3`） | 需要构造一个「注入过程中被内核杀掉」的真实目标。页哈希不符的 payload 能在本地复现 SIGKILL（见前期调研），但要串进 daemon 的完整注入链路才算验证到 |
+| seatbelt 拒绝 `file-map-executable` → 直接走 remap | 没有可用的测试目标：严格 profile 的系统守护进程不能随意拿来做注入试验，而自造的沙箱进程尚未搭起来 |
+
+这三条都是**逻辑上正确但未经执行验证**的路径。修改它们时不要依赖测试套件兜底 —— 它兜不住。
+
 ## 决策日志
 
 | 日期 | 变更 | 说明 |
@@ -452,4 +496,5 @@ private static func requireTargetIsStillRunning(pid: pid_t) throws {
 | 2026-08-10 | Implemented | 19 个测试全绿；回归测试已验证在旧行为下失败（`→ .machVirtualMemoryRemap) == .dlopen`） |
 | 2026-08-10 | 配套文章判断：**不写** | 关键的非显然决策（LV 为何不能决定路径、SIGKILL 盲区、2 秒 pending 窗口）已分别落在代码 doc comment、本提案与 `CLAUDE.md`。单独成篇只会把同一批理由再抄一遍，符合「写完只是把代码翻译成中文就不该写」的反向判据。唯一从签名看不出的调用方契约是「pin 了 `preferredStrategy` 就关掉自动退回」，已写在该属性的 doc comment 与 `README.md`，不足以支撑一篇使用指南 |
 | 2026-08-10 | 撤回 0.1.5，发布 0.2.0 | 用户决定删除 0.1.5 tag 而非保留。理由见「API 演进与废弃策略」：该版本没有值得保留的使用场景，且其内容随 0.2.0 一同发布，删 tag 不丢代码 |
+| 2026-08-10 | 补「验证覆盖与缺口」一节 | 发布后新增。起因是下游即将回报一份**只覆盖 dlopen 主路径**的真实验证结果，若提案不写清边界，它会被后来者当成全链路验证。同时把「本仓库从未真的注入过任何东西」这个缺口从会话里落进文档 —— 缺口写在结论旁边才有用，默认消失就等于没有 |
 | 2026-08-10 | 术语判断：**登记 3 条** | 新建 `Documentations/Glossary.md`：`library validation`（「请求」与「强制」之别，正是本次 bug 的成因，属易混淆近义词对）、`report page`（MachInjector 0.4.3 引入的机制及其盲区）、`seatbelt`（说明为何只有它仍直接决定路径） |
