@@ -498,3 +498,23 @@ private static func requireTargetIsStillRunning(pid: pid_t) throws {
 | 2026-08-10 | 撤回 0.1.5，发布 0.2.0 | 用户决定删除 0.1.5 tag 而非保留。理由见「API 演进与废弃策略」：该版本没有值得保留的使用场景，且其内容随 0.2.0 一同发布，删 tag 不丢代码 |
 | 2026-08-10 | 补「验证覆盖与缺口」一节 | 发布后新增。起因是下游即将回报一份**只覆盖 dlopen 主路径**的真实验证结果，若提案不写清边界，它会被后来者当成全链路验证。同时把「本仓库从未真的注入过任何东西」这个缺口从会话里落进文档 —— 缺口写在结论旁边才有用，默认消失就等于没有 |
 | 2026-08-10 | 术语判断：**登记 3 条** | 新建 `Documentations/Glossary.md`：`library validation`（「请求」与「强制」之别，正是本次 bug 的成因，属易混淆近义词对）、`report page`（MachInjector 0.4.3 引入的机制及其盲区）、`seatbelt`（说明为何只有它仍直接决定路径） |
+
+## 后记：一处前提已被订正（2026-08-11）
+
+**本提案正文保持原貌**（决策快照），但读到下面两处时请知道它们的前提已经不成立，订正见
+[提案 0002](0002-service-errors-that-survive-xpc.md) 与[术语表](../Glossary.md)的
+`library validation` 词条：
+
+1. **「表述限定」一节与「推论：这条分支只在它会判错的环境里才会触发」** —— 原文说「关闭 SIP 本身
+   就会放松 LV 强制」。不对。`amfid` 只有在 SIP 关闭时**才去读**
+   `/Library/Preferences/com.apple.security.libraryvalidation.plist`，真正的开关是那份 plist 里的
+   `DisableLibraryValidation`。**SIP 关了但该键没写（默认值），library validation 照常强制。**
+   本提案的实测机器同时满足了两个条件，当时只记下了其中一个。
+
+   这不影响本提案的结论 —— 「`CS_REQUIRE_LV` 置位不等于 LV 被强制，因此不能用它决定路径」反而更
+   成立了：真实状态取决于一份从进程标志位完全看不见的 plist。受影响的是那条推论的**覆盖范围**：
+   走到探测的目标并非「通常处于 LV 不强制的配置」，两种情况都很常见。
+
+2. **「实测：各种拒绝路径的耗时」一节** —— 原文说「AMFI library validation 拒绝本身因 SIP 关闭无法
+   直接复现」。既然真开关是那份 plist，改它即可在同一台机器上复现被拒。这条把「验证覆盖与缺口」里
+   记的 `dlopen` 被拒 → 退回 remap 缺口，从「造不出场景」降级为「能造，但需要 sudo 改全机状态」。

@@ -70,8 +70,11 @@ struct InjectionStrategyTests {
     /// carrying it — Music, Finder, Safari, every Apple app — straight to the
     /// remap path, on the theory that AMFI would refuse a `dlopen` anyway. The
     /// flag being set does not mean library validation is enforced: measured on
-    /// macOS 26.5.2 with SIP disabled, a process signed `library,runtime`
-    /// happily `dlopen`ed unsigned, ad-hoc-signed, and foreign-Team-ID dylibs.
+    /// macOS 26.5.2 with SIP disabled *and*
+    /// `/Library/Preferences/com.apple.security.libraryvalidation.plist`
+    /// carrying `DisableLibraryValidation` — both are required, SIP off alone
+    /// still enforces — a process signed `library,runtime` happily `dlopen`ed
+    /// unsigned, ad-hoc-signed, and foreign-Team-ID dylibs.
     /// Meanwhile remap is the path that can crash the target, so predicting it
     /// wrongly is the expensive mistake. The daemon now tries `dlopen` and
     /// falls back only on an actual refusal.

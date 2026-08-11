@@ -54,7 +54,18 @@ macOS 的一项代码签名策略：进程只接受 Apple 签名或与自身 Tea
 - **请求（requested）** —— 进程带有 `CS_REQUIRE_LV` 标志位（`0x2000`），可用 `csops(CS_OPS_STATUS)`
   读出。这是二进制签名时用 `--options library` 写进去的**意图**。
 - **强制（enforced）** —— 内核 AMFI 真的按该策略拒绝 dylib 加载。是否强制取决于**系统状态**，
-  在 SIP 关闭的机器上一般**不**强制。
+  而且要**同时**满足两个条件才会关掉：SIP 关闭，**并且**
+  `/Library/Preferences/com.apple.security.libraryvalidation.plist` 里的 `DisableLibraryValidation`
+  为真。
+
+**「关了 SIP 就不会被 LV 拦」是错的**，这是本项目踩过的坑。`amfid` 的判定链是：只有 SIP 关闭
+（或机器是 Apple 内部机）时它**才去读**那份 plist，读到的值才是真正的开关。所以关 SIP 只是打开了
+「允许读那份 plist」这道门 —— SIP 关了但 plist 没写（默认值），library validation **照样强制**。
+打开它：
+
+```bash
+sudo defaults write /Library/Preferences/com.apple.security.libraryvalidation.plist DisableLibraryValidation -bool true
+```
 
 把前者当成后者，正是把每个 Apple 应用都错误路由到 remap 路径的原因。探测函数
 `isLibraryValidationEnforced` 的名字读起来像在报告后者，实际只能报告前者 —— 因此它不允许决定注入

@@ -28,9 +28,12 @@ public enum InjectionStrategy: String, Codable, Sendable, Equatable {
     ///   hard-coded system whitelist. No sandbox extension unlocks that
     ///   predicate — `APP_SANDBOX_READ` only covers `file-read*`.
     /// - **AMFI library validation.** A process carrying `CS_REQUIRE_LV` may
-    ///   only accept Apple-signed or same-Team-ID dylibs. *May* — whether the
-    ///   flag is actually enforced depends on system state, not on the flag
-    ///   alone; see `isLibraryValidationEnforced` for what was measured.
+    ///   only accept Apple-signed or same-Team-ID dylibs. *May* — enforcement
+    ///   turns on two pieces of machine state, not on the flag: SIP has to be
+    ///   off *and*
+    ///   `/Library/Preferences/com.apple.security.libraryvalidation.plist` has
+    ///   to carry `DisableLibraryValidation`. Off-plus-unset, the common
+    ///   configuration, still enforces. See `isLibraryValidationEnforced`.
     case dlopen = "dlopen"
 
     /// Project the payload's already-mapped segments into the target with

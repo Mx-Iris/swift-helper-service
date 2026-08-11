@@ -64,11 +64,19 @@ extension InjectionStrategy {
     /// validation was not. Treating the flag as a prediction sent every Apple
     /// application down the remap path, which is how this stopped working.
     ///
-    /// Disabling SIP is itself what relaxes the enforcement, so the finding is
-    /// scoped to that configuration. It is not a narrow one: injecting into a
-    /// hardened target requires `task_for_pid`, which SIP already denies, so
-    /// a target that reaches this probe is usually running in exactly the
-    /// configuration where the flag is not enforced.
+    /// **Disabling SIP is not, by itself, what relaxes the enforcement.**
+    /// `amfid` only consults
+    /// `/Library/Preferences/com.apple.security.libraryvalidation.plist` once
+    /// SIP is off (or the machine is Apple-internal); the actual switch is that
+    /// file's `DisableLibraryValidation` value. SIP off with the key unset —
+    /// the default — still enforces library validation. The measurement above
+    /// therefore pins down a machine with *both* conditions met, not just SIP
+    /// off, and an earlier version of this comment got that wrong.
+    ///
+    /// Which is why a target reaching this probe can go either way. The
+    /// `task_for_pid` needed to get here already implies SIP is off, but the
+    /// plist value varies per machine and is invisible from this flag. The path
+    /// has to come from attempting a `dlopen`, never from this predicate.
     ///
     /// Kept because it still explains *why* a target refused a `dlopen`, which
     /// makes for a far better error message than the refusal alone. Returns
