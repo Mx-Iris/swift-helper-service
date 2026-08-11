@@ -179,3 +179,68 @@ public func encode(to encoder: Encoder) throws {
 
 **结果是线格式与裸 `XPCEndpoint` 逐位相同** —— 包一层不改变守护进程或 peer 看到的字节。所以可以
 在一端用包装、另一端用裸类型，不会出问题。
+
+## 六、错误怎么跨边界
+
+前面几节讲的都是**成功路径**的线格式。失败路径走另一套机制，而且它有一个不看代码就撞不上的坑。
+
+### 通道只搬 domain 和 code
+
+SwiftyXPC 用 `XPCErrorRegistry.BoxedError` 搬运错误。它写上线的只有两样东西：`domain` 和 `code`。
+完整的错误体只在**同时满足**两个条件时才写入：
+
+1. 抛出的错误是 `Error & Codable`；
+2. **接收方**用 `XPCErrorRegistry.shared.registerDomain(_:forErrorType:)` 注册过这个 domain。
+
+`NSError` 不是 `Codable`，所以它走第一条的反面：`userInfo` 连同 `localizedDescription` 在编码阶段
+就没了（`BoxedError.errorUserInfo` 直接硬编码为 `[:]`）。Swift 的 enum 错误只要没实现 `Codable`
+也是一样。
+
+也就是说，**服务端在错误里写的任何解释文字，默认都到不了调用方**。调用方拿到的是
+`SomeErrorDomain error 1.` 这种东西。
+
+### 包装：`HelperServiceFailure`
+
+修法在通道层，不在各个服务里。`ServiceFailureTransport.wrappingFailures(requestIdentifier:operation:)`
+包住每一个 handler：
+
+- 抛出的错误**已经是** `Error & Codable` → 原样重抛，不碰。SwiftyXPC 自己能把它完整搬过去。
+- 其余（含全部 `NSError`）→ 包装成 `HelperServiceFailure`，同时在 daemon 侧记一条 `#log(.error, …)`。
+
+`HelperServiceFailure` 靠 `CustomNSError` 把 `_domain` 钉死成
+`"com.JH.HelperCommunication.ServiceFailure"`（注册表要靠它查类型），同时用实例属性 `errorCode`
+透传原始 code。**于是调用方那边 `code` 不变，只有 `domain` 变**，原 domain 保存在
+`underlyingErrorDomain` 里。
+
+`localizedFailureDescription` 与 `underlyingErrorDebugDescription` 两个字段都存在，是因为它们互相
+补不上对方：Swift enum 错误没实现 `errorDescription` 时 `localizedDescription` 是一句通用废话，
+case 名只在 `String(describing:)` 里。
+
+### 两条不能碰的线
+
+**`HelperServiceFailure.errorDomain` 那个字符串是线格式的一部分**，与 `Request.identifier` 同性质。
+改它 → 两端对不上 → 退回 `BoxedError` → 描述又丢了，**而且不报错**。字段也只增不减，新增必须
+`Optional` 或带默认值。
+
+**`Error & Codable` 的放行分支不能去掉。** SwiftyXPC 自己的 `XPCConnection.Error` 就在预注册名单
+里，`HelperClient.errorIndicatesOutdatedPeer(_:)` 认的正是它；一旦被包装成 `HelperServiceFailure`，
+那个判别器会对所有错误返回 `false`。`swiftyXPCErrorFromAHandlerIsRelayedIntact` 守着这条。
+
+### 注册由库自己做
+
+`HelperClient.init`、`HelperPeerClient.init`、`HelperPeerServer.init` 各自调一次
+`HelperServiceFailure.registerForDecoding()`。**不要求调用方注册**是刻意的：忘记注册的表现是「静默
+退回修复前的行为」，没有任何编译错误或运行期提示——这类失败模式必须由库自己关掉。
+
+### 已知缺陷：消息名不认识时，调用方分辨不出来
+
+`XPCConnection.Error.unexpectedMessage` 在整个 SwiftyXPC 里**只有一处抛出**
+（`XPCConnection.respond(to:)` 找不到 handler 时），而那一处把错误交给**接收方自己的**
+`errorHandler` 后就 `return` 了，**不回复发送方**。发送方一直等不到回复，最后拿到的是
+`XPCError.connectionInterrupted`。
+
+后果：`HelperClient.errorIndicatesOutdatedPeer(_:)` 永远不会返回 `true`，
+`fetchToolVersion()` 那条「tool 太旧，请重装」的分支实际上打不开，旧 daemon 会被误判成临时故障。
+这个缺陷自 `a49e713` 引入起就存在，与错误包装无关，也没有被本次改动改善或恶化。
+`unhandledMessageDoesNotReachTheCallerAsUnexpectedMessage` 把当前这个（错误的）行为钉住了 ——
+哪天上游改成会回复，那个测试会失败并提醒我们判别器可以重新信任了。

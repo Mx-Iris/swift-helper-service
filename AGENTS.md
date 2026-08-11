@@ -15,7 +15,8 @@ Guidance for coding agents working in this repository. `CLAUDE.md` is a symlink 
 - Build the whole package: `swift build 2>&1 | xcsift`
 - Build a specific product: `swift build --product HelperClient 2>&1 | xcsift`
 - Tests: **`swift test` — judge the result by its exit code. Never by `xcsift`'s summary.** xcsift 1.0.21 does parse swift-testing, but discards that whole batch of results as soon as any swift-testing test fails, including the ones that passed: the summary becomes `"status": "success"`, `"failed_tests": 0`. XCTest results are parsed correctly, so in a mixed target their `passed_tests` / `test_time` keep the summary looking healthy while a swift-testing failure is swallowed. There is no usable tell — a green summary looks identical whether the run was genuinely green or swift-testing blew up. xcsift's own exit code is always 0 as well, even when it does report `"status": "failed"`, so nothing may short-circuit on that either. Piping through xcsift remains useful for *build* diagnostics, which it parses correctly. Verified on macOS 26.5.2 / xcsift 1.0.21 across all four combinations of framework and outcome.
-- **Test coverage is narrow — do not mistake a green run for a verified system.** There are exactly two test targets: `HelperCommunicationTests` (`Codable` round-trips, identifier namespacing, `HelperClient.errorIndicatesOutdatedPeer(_:)`) and `InjectionServiceTests` (the injection strategy probes plus `InjectApplicationRequest`'s wire format). **`HelperServer`, `HelperClient`, `MainService`, and the whole `HelperPeer` handshake have no tests at all**, and nothing in this repository ever performs a real injection. See the 验证覆盖与缺口 section of [Evolution 0001](Documentations/Evolutions/0001-injection-strategy-attempt-not-predict.md).
+- **Test coverage is narrow — do not mistake a green run for a verified system.** There are exactly two test targets: `HelperCommunicationTests` (`Codable` round-trips, identifier namespacing, `HelperClient.errorIndicatesOutdatedPeer(_:)`, and the error-transport round trips) and `InjectionServiceTests` (the injection strategy probes plus `InjectApplicationRequest`'s wire format). **`HelperServer`, `HelperClient`, `MainService`, and the whole `HelperPeer` handshake have no tests at all**, and nothing in this repository ever performs a real injection. See the 验证覆盖与缺口 section of [Evolution 0001](Documentations/Evolutions/0001-injection-strategy-attempt-not-predict.md).
+- **`ServiceFailureTransportTests` is the only test that puts a message on a real XPC connection**, via an anonymous `XPCListener` the test process connects back to. Reach for that pattern before assuming something cannot be tested end to end — the transport bug Evolution 0002 fixed, and the dead `errorIndicatesOutdatedPeer(_:)` discriminator it uncovered, both survived precisely because every earlier test checked `Codable` shapes in isolation.
 - Swift toolchain: 6.2; platforms declared in `Package.swift` are macOS 10.15+ / macCatalyst 13+. Newer APIs are gated per call site with `@available` rather than by raising the package minimum (`SMAppServiceDaemonInstaller` → macOS 13, `ApplicationsService` → macOS 12, the remap injection path → macOS 11). Almost every source file is wrapped in `#if os(macOS) || targetEnvironment(macCatalyst)`; the two AppKit-dependent services (`ApplicationsService`, `InjectedEndpointRegistryService`) use a bare `#if os(macOS)` to exclude macCatalyst. `canImport(AppKit)` appears only in the test targets, never in `Sources/`. The macCatalyst surface is intentionally minimal — it exists so shared code compiles, not as a supported target.
 
 ## Architecture (the part that requires reading multiple files)
@@ -36,7 +37,7 @@ This is why the registry-related request types (`FetchEndpointRequest`, `ListSer
 
 ### Module layout and why each exists
 
-- `HelperCommunication` — shared message-protocol layer. Defines `Request` (with `associatedtype Response`, `static var identifier: String`), `VoidResponse`, `PingRequest`, `FetchVersionRequest`, the registry requests, and `SwiftyXPC` extensions that adapt the untyped XPC API to the `Request`/`Response` protocol. Also defines four **`package`** behaviour extensions on `SwiftyXPC.XPCConnection` (`pingHelperTool`, `registerEndpoint`, `fetchEndpoint`, `listHelperServerInfos`) that in-package code should use *instead of* constructing the registry request types directly. These are not `public` — outside the package, the entry point is `HelperClient`'s own methods.
+- `HelperCommunication` — shared message-protocol layer. Defines `Request` (with `associatedtype Response`, `static var identifier: String`), `VoidResponse`, `PingRequest`, `FetchVersionRequest`, the registry requests, `HelperServiceFailure` + `ServiceFailureTransport` (see Error transport below), and `SwiftyXPC` extensions that adapt the untyped XPC API to the `Request`/`Response` protocol. Also defines four **`package`** behaviour extensions on `SwiftyXPC.XPCConnection` (`pingHelperTool`, `registerEndpoint`, `fetchEndpoint`, `listHelperServerInfos`) that in-package code should use *instead of* constructing the registry request types directly. These are not `public` — outside the package, the entry point is `HelperClient`'s own methods.
 - `HelperService` — protocol-only target, a few dozen lines. Defines `HelperService`, `HelperHandler`, `HelperServerType`, and `XPCHelperHandler` — a struct wrapping a `SwiftyXPC.XPCListener` whose *type* is `public` (external `HelperService` implementations receive one) but whose storage and initializer are `package` (so `SwiftyXPC` does not leak through the public surface). It is a wrapper, **not** a retroactive `XPCListener: HelperHandler` conformance. Both `HelperServer` and `HelperPeer` mount services through it, which is what lets one service implementation run in either topology unchanged. Anything that plugs into a server or a peer depends only on this target.
 - `HelperServer` — the actor that owns the `XPCListener`, prepends `MainService` to the user-supplied services, calls `setupHandler` on each, and (for `.plain` servers) registers its endpoint with the tool. Must be linked into the helper binary. `init` takes a `version:` parameter that is surfaced through `MainService`'s `FetchVersionRequest` handler.
 - `HelperClient` — the actor used by the host app. Owns the tool connection and a dictionary of per-server connections, plus the `SMAppService.daemon(plistName:)` installer (`SMAppServiceDaemonInstaller`, `@available(macOS 13, *)`), `fetchToolVersion()` against `MainService`, and the `HelperClient.errorIndicatesOutdatedPeer(_:)` discriminator for callers that need to distinguish "outdated tool binary" from transient XPC failures.
@@ -45,7 +46,9 @@ This is why the registry-related request types (`FetchEndpointRequest`, `ListSer
 - `Sources/HelperServices/{Files,Applications,InjectedEndpointRegistry}Service` — the other bundled services. `FilesService` is the minimal example of the Interface/Implementation shape; `ApplicationsService` (`@available(macOS 12, *)`, AppKit, so `#if os(macOS)`) launches apps and terminates them when the caller PID exits; `InjectedEndpointRegistryService` keeps injected processes' endpoints keyed by pid, with per-pid `DispatchSourceProcess` cleanup.
 - `Sources/HelperProcessProbe` — C target wrapping the two pieces of kernel SPI that answer "would this process accept that dylib": `sandbox_check` (variadic, so the call must be emitted by the C compiler) and `csops` (SPI with no Swift-importable declaration). Used only by `InjectionServiceImplementation`, which composes them into `InjectionStrategy.initialAttempt(forTarget:payloadPath:)`. A support target, not a service — it has no Interface/Implementation split because it crosses no XPC boundary.
 
-  **`isLibraryValidationEnforced` must not decide the injection path.** It reports whether the target carries `CS_REQUIRE_LV`, which says library validation was *requested*, not that it is *enforced*. Enforcement turns on two pieces of machine state that the flag cannot see: **SIP has to be off *and* `/Library/Preferences/com.apple.security.libraryvalidation.plist` has to carry `DisableLibraryValidation`.** Disabling SIP alone does not lift enforcement — it only lets `amfid` read that file. Routing on the flag sent every Apple application to the remap path, which is the path that can crash the target. Keep it for explaining *why* a `dlopen` was refused; see [Evolution 0001](Documentations/Evolutions/0001-injection-strategy-attempt-not-predict.md) (and its 后记, which corrects 0001's SIP premise) and the `library validation` entry in [Glossary.md](Documentations/Glossary.md).
+  **`isLibraryValidationEnforced` must not decide the injection path.** It reports whether the target carries `CS_REQUIRE_LV`, which says library validation was *requested*, not that it is *enforced*. Enforcement turns on two pieces of machine state that the flag cannot see: **SIP has to be off *and* `/Library/Preferences/com.apple.security.libraryvalidation.plist` has to carry `DisableLibraryValidation`.** Disabling SIP alone does not lift enforcement — it only lets `amfid` read that file. Routing on the flag sent every Apple application to the remap path, which is the path that can crash the target. Keep it for explaining *why* a `dlopen` was refused; see [Evolution 0001](Documentations/Evolutions/0001-injection-strategy-attempt-not-predict.md) (and its 后记, which corrects 0001's SIP premise), [Guides/InjectionPrerequisites.md](Documentations/Guides/InjectionPrerequisites.md), and the `library validation` entry in [Glossary.md](Documentations/Glossary.md).
+
+  `InjectionServiceImplementation` is `@Loggable` under subsystem `com.JH.HelperService.InjectionService` — it records the pid, payload path, chosen strategy, a refused `dlopen`'s full text, and every error it raises. The subsystem is spelled out because a daemon has no bundle for `@Loggable` to infer one from. Read it with `log stream --predicate 'subsystem == "com.JH.HelperService.InjectionService"' --level info`.
 - `Sources/HelperServices/<Name>Service/{Interface,Implementation}` — **every concrete service is split into two targets**. The Interface target exposes only the `Request`/payload types and depends only on `HelperCommunication`; the Implementation target conforms to `HelperService` and pulls in heavyweight dependencies (e.g., `MachInjector`). The client app links the Interface; the helper binary links the Implementation. **New services must follow this split** — don't add types that bridge across the boundary.
 
 ### Request/Response convention
@@ -80,14 +83,47 @@ is a source-breaking change and needs a proposal.
 | `HelperService.run()` | A protocol requirement that **nothing calls**; every implementation is an empty `{}`. Don't put startup work there expecting it to run. |
 | `Sources/HelperCommunication/HelperTool.swift` | The `HelperTool` actor has **no references anywhere** — dead code. Not to be confused with `pingHelperTool()` / `isPrivilegedHelperTool`, which are live and unrelated. |
 | `MainService`'s registry | **Only grows.** No unregister, no process monitor; entries for dead processes persist. |
+| `HelperClient.errorIndicatesOutdatedPeer(_:)` | **Cannot return `true`, and never could.** See Versioning below. |
 
 Error handling is also inconsistent: `HelperServer` / `HelperPeer*` use `@Loggable` + `#log`, while
-`HelperClient` and `MainService` use bare `print(error)`.
+`HelperClient` and `MainService` use bare `print(error)`. Note this is about *connection-level*
+error handlers — failures thrown out of message handlers are logged uniformly by
+`ServiceFailureTransport`, see below.
+
+## Error transport
+
+**Service-side errors are wrapped before they cross XPC. Do not undo this by catching in a service.**
+
+`ServiceFailureTransport.wrappingFailures(requestIdentifier:operation:)` wraps every message
+handler the package installs. A failure that is not already `Error & Codable` becomes a
+`HelperServiceFailure` and gets logged on the daemon side; one that *is* `Codable` is rethrown
+untouched. Without the wrapping, SwiftyXPC's `BoxedError` carries only `domain` and `code` and the
+description is lost at the encoding stage — see
+[TypedMessaging.md](Documentations/Architecture/TypedMessaging.md) 第六节 and
+[Evolution 0002](Documentations/Evolutions/0002-service-errors-that-survive-xpc.md).
+
+Three things must not be broken when touching this:
+
+- **`HelperServiceFailure.errorDomain` is wire format**, like `Request.identifier`. Changing it makes
+  both ends fall back to a bare box — silently, with no compile error. Fields are add-only, and new
+  ones must be `Optional` or defaulted.
+- **The `Error & Codable` passthrough must stay.** `XPCConnection.Error` rides on it; wrapping that
+  type would make `errorIndicatesOutdatedPeer(_:)` answer `false` for everything.
+- **Registration is the library's job**, done from `HelperClient.init` / `HelperPeerClient.init` /
+  `HelperPeerServer.init`. Never push it onto callers: forgetting it degrades silently back to the
+  old behaviour.
+
+All 15 handler installation sites in `Sources/` are covered: 7 go through the typed baseline in
+`XPCExtensions.swift` (`XPCHelperHandler`, `HelperPeer*`'s typed `setMessageHandler`, and the four
+peer handshake handlers), and `HelperPeer*`'s 8 name-based `setMessageHandler` overloads wrap
+individually because they call SwiftyXPC directly. **A new installation site that bypasses both must
+do its own wrapping.**
 
 ## Versioning
 
 - `HelperServer.init(serverType:version:services:)` requires a version string. `MainService` exposes it via `FetchVersionRequest` (`com.JH.HelperCommunication.FetchVersion`).
-- Host apps call `HelperClient.fetchToolVersion()`. When the running tool predates `FetchVersionRequest`, the call throws `SwiftyXPC.XPCConnection.Error.unexpectedMessage`; use `HelperClient.errorIndicatesOutdatedPeer(_:)` (only `true` for `.unexpectedMessage`, `false` for every other case, including non-SwiftyXPC errors) to distinguish "tool is outdated, reinstall" from transient XPC failures.
+- Host apps call `HelperClient.fetchToolVersion()`. `HelperClient.errorIndicatesOutdatedPeer(_:)` is meant to tell "tool is outdated, reinstall" apart from transient XPC failures, and returns `true` only for `SwiftyXPC.XPCConnection.Error.unexpectedMessage`.
+- **That discriminator cannot fire in practice — assume an outdated tool is indistinguishable from a dropped connection.** SwiftyXPC throws `unexpectedMessage` in exactly one place (`XPCConnection.respond(to:)`, on an unknown message name) and that path hands the error to the *receiving* process's own `errorHandler` and returns **without replying**. The caller waits, then gets `XPCError.connectionInterrupted`. So a tool predating `FetchVersionRequest` reads as a transient failure. Present since `a49e713`; found while writing Evolution 0002's round-trip tests, and pinned by `unhandledMessageDoesNotReachTheCallerAsUnexpectedMessage` — **if that test ever fails, upstream started replying and the discriminator can be trusted again.**
 
 ## Installation path
 
@@ -98,6 +134,7 @@ There is exactly one. The legacy `SMJobBless` flow (`installTool(name:)`, `kSMRi
 ## Documentation
 
 - **`Documentations/Architecture/` explains why the design looks like this.** [Overview.md](Documentations/Architecture/Overview.md) is the entry point; [ModuleLayering.md](Documentations/Architecture/ModuleLayering.md), [TypedMessaging.md](Documentations/Architecture/TypedMessaging.md), and [BrokeredPeer.md](Documentations/Architecture/BrokeredPeer.md) go deeper per area. This file is the lookup table; those carry the reasoning. When the two disagree, the source wins — then fix both.
+- `Documentations/Guides/` is for contracts a caller cannot infer from a signature. [InjectionPrerequisites.md](Documentations/Guides/InjectionPrerequisites.md) is the host-machine state injection depends on — **disabling SIP does not disable library validation**; the switch is `DisableLibraryValidation` in `/Library/Preferences/com.apple.security.libraryvalidation.plist`.
 - `Documentations/README.md` is the index — **every new or renamed document must be registered there**.
 - `Documentations/Evolutions/NNNN-*.md` holds one proposal per substantive change, covering its whole lifecycle from research to landing. Do not split a change into separate design / plan / report files. `Documentations/Evolutions/README.md` is the status table and declares the project kind (**library, source-distributed** — so proposals fill in source compatibility and write "not applicable" for ABI).
 - `CHANGELOG.md` is public-facing and written in English. Record source-breaking changes explicitly, with the compiler error a downstream project will see.

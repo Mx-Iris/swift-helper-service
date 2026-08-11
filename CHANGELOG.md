@@ -6,6 +6,66 @@ source-breaking changes.
 
 This file starts at 0.2.0. Earlier releases are not covered.
 
+## [0.3.0] — 2026-08-11
+
+### Changed
+
+- **Service errors keep their description across the XPC boundary.** Anything a service threw used
+  to reach the caller as domain + code and nothing else: SwiftyXPC moves errors as
+  `XPCErrorRegistry.BoxedError`, which only carries the full body for errors that are
+  `Error & Codable`. `NSError` is not, so `userInfo` — `localizedDescription` included — was dropped
+  at the encoding stage. Handlers now wrap non-`Codable` failures in `HelperServiceFailure`, so a
+  caller sees what actually went wrong (for a refused injection, `dlerror`'s text). Every existing
+  service benefits without a line of change, because the wrapping sits at the transport layer.
+
+  **Source-breaking at runtime, not at compile time.** `(error as NSError).domain` becomes
+  `"com.JH.HelperCommunication.ServiceFailure"` for errors originating in a service. The compiler
+  will not flag this. Code that branches on the domain:
+
+  ```swift
+  // Before
+  if (error as NSError).domain == "MIMachInjectorErrorDomain" { … }
+  // After
+  if let failure = error as? HelperServiceFailure,
+     failure.underlyingErrorDomain == "MIMachInjectorErrorDomain" { … }
+  ```
+
+  `(error as NSError).code` is **unchanged** — `HelperServiceFailure` forwards the original code
+  through `CustomNSError.errorCode`.
+
+  **Both ends must be on 0.3.0 to see descriptions.** A client that predates this release has not
+  registered the error domain, so it decodes back to a bare box: it sees the new domain, the
+  original code, and still no description.
+
+- **`InjectionService` logs to the daemon's `os.Logger`.** A failed injection used to leave no trace
+  at either end. It now records the target pid, payload path, chosen strategy, the full text of a
+  refused `dlopen`, and every error it raises, under subsystem
+  `com.JH.HelperService.InjectionService`. The transport layer logs handler failures generally,
+  under `com.JH.HelperCommunication`.
+
+### Added
+
+- `HelperServiceFailure` (in `HelperCommunication`) — the wire form of a service-side failure,
+  carrying the original domain, code, `localizedDescription`, `String(describing:)`, and the
+  `Request.identifier` that failed. `HelperClient`, `HelperPeerClient` and `HelperPeerServer`
+  register it for decoding from their initializers; callers do not have to.
+- `Documentations/Guides/InjectionPrerequisites.md` — the host-machine state injection depends on.
+  Notably: **disabling SIP does not disable library validation.** The real switch is
+  `DisableLibraryValidation` in `/Library/Preferences/com.apple.security.libraryvalidation.plist`;
+  turning SIP off only permits `amfid` to read that file. The 0.2.0 note below records its test
+  environment as "SIP disabled and no `amfi_get_out_of_my_way`" without this qualifier — on a
+  machine where SIP is off but that key was never written, library validation is still enforced.
+
+### Known issues
+
+- **`HelperClient.errorIndicatesOutdatedPeer(_:)` cannot fire, and never could.** Uncovered by this
+  release's tests, but present since the discriminator was introduced. SwiftyXPC throws
+  `XPCConnection.Error.unexpectedMessage` in exactly one place, and that path reports it to the
+  *receiving* process's own error handler without replying to the sender; the caller times out and
+  sees `XPCError.connectionInterrupted` instead. So `fetchToolVersion()`'s "tool is outdated,
+  reinstall" branch reads an old daemon as a transient failure. Unaffected by the error-wrapping
+  change, and tracked separately.
+
 ## [0.2.0] — 2026-08-10
 
 Supersedes the withdrawn 0.1.5 and carries everything it contained; see below.

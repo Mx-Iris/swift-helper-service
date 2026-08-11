@@ -18,6 +18,7 @@
 | 路径 | 内容 |
 |------|------|
 | [`Architecture/`](Architecture/Overview.md) | 架构与设计说明 —— 整体是什么样、以及**为什么这么设计** |
+| [`Guides/`](Guides/InjectionPrerequisites.md) | 使用指南 —— 调用方要遵守的契约、以及从 API 签名上看不出来的坑 |
 | [`Evolutions/`](Evolutions/README.md) | 提案 —— 每次实质变更一篇，从调研到落地全生命周期都在同一份文件里 |
 | [`Glossary.md`](Glossary.md) | 项目术语表 —— 自造词、本项目特有含义、易混淆的近义词对 |
 
@@ -32,6 +33,12 @@
 | [TypedMessaging.md](Architecture/TypedMessaging.md) | `Request`/`Response` 协议层。原生 XPC 的三类隐形错误；`identifier` 是路由键（因而是线格式的一部分）；为什么不用 `NSXPCInterface`；新增消息的完整步骤与兼容性演进；`HelperPeerEndpoint` 为何与裸 `XPCEndpoint` 线格式逐位相同。 | 新增一种消息、排查「消息发出去没人接」、或改动任何 `identifier` 之前。 |
 | [BrokeredPeer.md](Architecture/BrokeredPeer.md) | `HelperPeer` 的独立握手协议。Client/Server 命名为何容易误导；初次握手与重连的完整时序；**两阶段 `init` + `activate()` 为何必须存在**（否则有静默丢消息的竞态）；状态流为何用 `AsyncStream` 而非 Combine；与 `HelperServer`/`HelperClient` 的对照表。 | 用 `HelperPeerClient` / `HelperPeerServer`，或排查握手竞态时。**改动握手顺序前必读。** |
 
+### Guides —— 使用指南
+
+| 文档 | 讲什么 | 什么时候读 |
+|---|---|---|
+| [InjectionPrerequisites.md](Guides/InjectionPrerequisites.md) | 注入的运行前提 —— 那些「代码没错但就是注不进去」的宿主机状态。**关 SIP 不等于关掉 library validation**（真正的开关是一份 plist 里的值）；走 remap 路径为何必须导出入口符号；seatbelt 与「注入成功但目标被内核杀掉」；以及怎么读 daemon 日志。 | 注入失败排查时；调用 `InjectApplicationRequest` 之前。 |
+
 ### Evolutions —— 提案
 
 见 [Evolutions/README.md](Evolutions/README.md) 的状态总表。
@@ -41,8 +48,8 @@
   `mach_vm_remap`，并补上目标进程存活检查。含实测数据、被否方案，以及一节**验证覆盖与缺口**。
 - [0002 - 服务端错误跨 XPC 保住描述，并在 daemon 侧留下日志](Evolutions/0002-service-errors-that-survive-xpc.md)
   —— 服务端抛的错到达调用方时只剩 domain + code，描述全丢；daemon 侧又无日志，失败两端不留痕。
-  在通道层统一包装成一个 `Codable` 的传输错误类型并记日志，所有现有服务一行不改即受益。**Draft，
-  待批准。**
+  在通道层统一包装成一个 `Codable` 的传输错误类型并记日志，所有现有服务一行不改即受益。落地时还
+  带来了本仓库**第一个真实 XPC 往返测试**，并借此发现 `errorIndicatesOutdatedPeer` 一直是失效的。
 
 ### 其他
 

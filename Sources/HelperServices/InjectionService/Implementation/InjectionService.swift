@@ -3,7 +3,11 @@ import Foundation
 import HelperService
 import MachInjector
 import InjectionServiceInterface
+import FoundationToolbox
 
+/// The subsystem is spelled out because a daemon has no bundle to infer one from:
+/// `@Loggable`'s default would fall back to the bare type name.
+@Loggable(subsystem: "com.JH.HelperService.InjectionService", category: "Injection")
 public actor InjectionService: HelperService {
     private static let errorDomain = "com.JH.HelperService.InjectionService"
 
@@ -44,11 +48,31 @@ public actor InjectionService: HelperService {
         // defeat the point of `preferredStrategy` being an escape hatch.
         let mayFallBackToRemap = request.preferredStrategy == nil
 
+        #log(
+            .info,
+            """
+            Injecting \(payloadPath, privacy: .public) into pid \(request.pid, privacy: .public) \
+            via \(strategy.rawValue, privacy: .public) \
+            (fallback to remap \(mayFallBackToRemap ? "allowed" : "not allowed", privacy: .public))
+            """
+        )
+
         switch strategy {
         case .dlopen:
             do {
                 try MachInjector.inject(pid: request.pid, dylibPath: payloadPath)
             } catch {
+                // The refusal text is the single most useful thing in a failed
+                // injection, and only this process ever sees it in full.
+                #log(
+                    .error,
+                    """
+                    pid \(request.pid, privacy: .public) refused a dlopen of \
+                    \(payloadPath, privacy: .public): \(String(describing: error), privacy: .public) \
+                    — \(error.localizedDescription, privacy: .public). \
+                    \(mayFallBackToRemap ? "Falling back to mach_vm_remap." : "Caller pinned dlopen, not falling back.", privacy: .public)
+                    """
+                )
                 guard mayFallBackToRemap else { throw error }
                 try injectViaRemap(request: request, payloadPath: payloadPath, dlopenFailure: error)
                 return
@@ -136,8 +160,12 @@ public actor InjectionService: HelperService {
         )
     }
 
+    /// Every failure this service raises goes through here, so this is also where it
+    /// is written to the log. The transport layer records that a handler failed;
+    /// this records it with the injection context the transport layer cannot see.
     private static func makeError(code: Int, description: String) -> NSError {
-        NSError(domain: errorDomain, code: code, userInfo: [NSLocalizedDescriptionKey: description])
+        #log(.error, "Injection failed (code \(code, privacy: .public)): \(description, privacy: .public)")
+        return NSError(domain: errorDomain, code: code, userInfo: [NSLocalizedDescriptionKey: description])
     }
 }
 #endif

@@ -1,6 +1,6 @@
 # 0002 - 服务端错误跨 XPC 保住描述，并在 daemon 侧留下日志
 
-- **状态**: Draft
+- **状态**: Implemented
 - **作者**: JH
 - **创建日期**: 2026-08-11
 - **最后更新**: 2026-08-11
@@ -8,8 +8,9 @@
 - **关联提案**: [0001](0001-injection-strategy-attempt-not-predict.md) —— 本提案修复的正是 0001
   写下的那些诊断文案至今没有一条能到达调用方
 - **实现分支 / PR**: 待定
-- **配套文档**: 拟新增 `Documentations/Guides/InjectionPrerequisites.md`（注入的运行前提，含
-  AMFI library validation 那条）
+- **配套文档**: [`Guides/InjectionPrerequisites.md`](../Guides/InjectionPrerequisites.md)（注入的
+  运行前提，含 AMFI library validation 那条）；
+  [`Architecture/TypedMessaging.md`](../Architecture/TypedMessaging.md) 第六节「错误怎么跨边界」
 
 ## 摘要
 
@@ -441,6 +442,88 @@ sudo defaults write /Library/Preferences/com.apple.security.libraryvalidation.pl
 - `amfid` 的判定链本身（依赖系统版本，函数偏移换版本即失效）。
 - daemon 侧日志是否真的落到 `log stream`（需要一个真实安装的 daemon）。
 
+## 落地记录
+
+**2026-08-11 落地，与提案的差异如下。** 提案正文保持原貌，不回头改写成与实现一致。
+
+### 一、包装点不是自由函数，而是一个 `@Loggable` 类型的 static 方法
+
+提案设计的是 `package func wrappingFailuresForTransport(requestIdentifier:operation:)`。**这样写不
+出日志**：`#log` 宏展开成 `Self.logger.…` / `Self._osLog`，需要一个 `@Loggable` 类型提供 `Self`，
+自由函数里没有。
+
+实际落地为 `ServiceFailureTransport.wrappingFailures(requestIdentifier:operation:)` —— 一个
+`@Loggable` 的 `package enum` 的 static 方法。行为与提案描述完全一致（Codable 放行 / 其余包装并记
+日志），只是挂载点不同。
+
+### 二、接入点是 2 类，不是 3 类
+
+提案盘点出三类入口，其中第三类「`HelperPeer*` 的握手内部 handler」**不需要单独接入** —— 它们
+（`wireListenerHandlers` 里的 `PingRequest` / `ServerLaunchedNotification` /
+`ClientReconnectedNotification`）用的就是 `listener.setMessageHandler(requestType:)`，即第一类的
+typed 底座，已被覆盖。
+
+实际改动：typed 底座 1 处 + `HelperPeer*` 的 name-based 重载 8 处（两个类各 4 个）。落地后复核了
+`Sources/` 下全部 15 个 handler 安装点，无遗漏。
+
+### 三、两处日志显式指定了 subsystem
+
+`@Loggable` 默认的 subsystem 是 `Bundle.main.bundleIdentifier ?? "<类型名>"`。**daemon 是没有
+bundle 的可执行文件**，会退回类型名，而可检索性正是本提案的目的之一。因此
+`ServiceFailureTransport` 用 `com.JH.HelperCommunication`、`InjectionService` 用
+`com.JH.HelperService.InjectionService`。仓库里既有的三处 `@Loggable` 仍用默认值，未一并改动（不
+属本提案范围）。
+
+### 四、真实 XPC 往返测试做成了 —— 提案原本准备把它记为缺口
+
+提案的验证计划里，「同进程 anonymous listener 自连」被列为「尽力做，做不成如实记为缺口」。**做成
+了**：`XPCListener(type: .anonymous)` + `XPCConnection(type: .remoteServiceFromEndpoint(...))` 在
+同一个测试进程内往返正常。
+
+于是本仓库有了**第一个把消息放到真实 XPC 连接上的测试**。复现测试在修复前如期失败，报的正是
+`The operation couldn't be completed. (com.JH.Tests.UpstreamDomain error 42.)`。
+
+最终 28 个测试全绿（`swift test` 退出码 0）。新增覆盖：`NSError` 描述跨边界保住、bare Swift enum
+错误的 case 名经 `underlyingErrorDebugDescription` 传出、已 `Codable` 的错误不被包装、
+`XPCConnection.Error` 原样透传、`HelperServiceFailure` 的 Codable 往返与 domain/code 语义、注册
+幂等。
+
+### 五、落地时发现：`errorIndicatesOutdatedPeer(_:)` 一直是失效的
+
+**这是本次最重要的意外发现，它推翻了提案（以及 `AGENTS.md`）共有的一个前提。**
+
+提案在前期调研里写道「`errorIndicatesOutdatedPeer(_:)` 之所以能工作，正是因为它认的
+`XPCConnection.Error` 恰好在预注册名单里」。那句话对**解码**而言没错，但漏了上游一层：
+`XPCConnection.Error.unexpectedMessage` 在整个 SwiftyXPC 里**只有一处抛出**
+（`XPCConnection.respond(to:)` 找不到 handler 时），而那一处把错误交给**接收方自己的**
+`errorHandler` 之后就 `return` 了，**根本不回复发送方**。
+
+所以调用方永远收不到 `unexpectedMessage`，它等到的是 `XPCError.connectionInterrupted`（实测）。
+`fetchToolVersion()` 那条「tool 太旧，请重装」的分支打不开，旧 daemon 会被误判成临时故障。
+
+四问的结论：
+
+1. **能复现**：能，`unhandledMessageDoesNotReachTheCallerAsUnexpectedMessage` 就是它的复现用例。
+2. **与本次改动的关系**：无。handler 查找失败的路径根本不经过包装函数，本次改动既没有改善也没有
+   恶化它。
+3. **值不值得修**：影响真实但局限于版本探测的错误分类。修它要么改上游 SwiftyXPC，要么在本库另想
+   办法（例如让 `FetchVersionRequest` 走一条带超时的探测），**属于另一件事，不塞进本提案**。
+4. **以前修过吗**：没有。自 `a49e713` 引入起就是这样，从未被发现 —— 因为在本提案之前，本仓库没有
+   任何测试会把消息放到真实连接上。**与 0001 漏掉传输 bug 是同一个根因。**
+
+处理方式：写成一个断言当前（错误）行为的回归测试并永久保留，注释写明它是现状快照；上游哪天改成
+会回复，那个测试就会失败并提醒我们判别器可以重新信任。同时订正了 `AGENTS.md` 和
+`TypedMessaging.md` 里的相应描述。
+
+### 六、补充一条提案未覆盖的兼容性影响
+
+提案的「影响」一节只算了「升级后的调用方」。还有一种组合：**旧客户端（0.2.x）+ 新 daemon
+（0.3.0）**。旧客户端没有注册这个 domain，解码退回 `.uncodable`，于是它看到的是
+`domain = com.JH.HelperCommunication.ServiceFailure`、code 不变、**描述依然丢失**。
+
+即对未升级的调用方而言，本次改动只改了 domain、没带来好处。这不会崩，但值得在 CHANGELOG 里说明
+「两端都要升级才拿得到描述」。
+
 ## 决策日志
 
 - **2026-08-11** —— 起因是 `FinderSidebarIconFix` 的一次排查经由另一个会话转达。上游报告把病因定位
@@ -461,3 +544,11 @@ sudo defaults write /Library/Preferences/com.apple.security.libraryvalidation.pl
   变成可按需复现的。这把本提案从「只能靠合成测试」提升为「有真·验收标准」，并顺带给 0001 留下的
   「dlopen 被拒 → 退回 remap 从未被真实触发」缺口开了一条路。**没有这次订正，本提案会在无法端到端
   验证的前提下落地** —— 而无法端到端验证正是这个 bug 当初能溜过 0001 的原因。
+- **2026-08-11** —— 提案获批准，直接进入实现。
+- **2026-08-11** —— 动手第一件事是写复现测试，结果顺带证否了提案自己的一个悲观假设：同进程
+  anonymous listener 自连**可行**，真实 XPC 往返测试不必记为缺口。**先写测试的收益在这一步就已经
+  兑现了** —— 如果先写实现，这条路大概率不会被试。
+- **2026-08-11** —— 实现期发现 `errorIndicatesOutdatedPeer(_:)` 从来没有生效过（详见「落地记录」
+  第五节）。它是被那个新写的真实往返测试撞出来的：原本只想验证「包装不能碰坏判别器」，结果发现
+  判别器本来就是坏的。**提案里那句「这也意味着任何修改都不能把它碰坏」建立在一个没核实的前提上**
+  —— 核实了编码/解码两侧，漏了「错误到底会不会被回传」这一层。归为独立问题，不扩大本次范围。

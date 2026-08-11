@@ -213,6 +213,7 @@ let package = Package(
                 "HelperService",
                 "HelperProcessProbe",
                 .product(name: "MachInjector", package: "MachInjector"),
+                .product(name: "FoundationToolbox", package: "FrameworkToolbox"),
             ],
             path: "Sources/HelperServices/InjectionService/Implementation",
         ),

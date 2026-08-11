@@ -22,7 +22,12 @@ public actor HelperClient {
 
     private var serverConnectionByInfo: [HelperServerInfo: SwiftyXPC.XPCConnection] = [:]
 
-    public init() {}
+    public init() {
+        // Registered here rather than left to the caller: an unregistered domain
+        // decodes back to a bare `BoxedError`, which drops the service's error
+        // description again — silently, and identically to the pre-fix behaviour.
+        HelperServiceFailure.registerForDecoding()
+    }
 
     public var isConnectedToTool: Bool {
         get async {

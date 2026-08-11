@@ -71,6 +71,9 @@ public actor HelperPeerServer: PeerConnection {
         identifier: String,
         services: [HelperService] = []
     ) async throws {
+        // Both ends of a peer link can receive the other's errors, so both register.
+        HelperServiceFailure.registerForDecoding()
+
         var capturedContinuation: AsyncStream<PeerConnectionState>.Continuation!
         self.stateStream = AsyncStream<PeerConnectionState> { continuation in
             capturedContinuation = continuation
@@ -172,27 +175,38 @@ public actor HelperPeerServer: PeerConnection {
         return peerConnection
     }
 
+    // These four call SwiftyXPC directly instead of going through the typed baseline
+    // in `XPCExtensions.swift`, so each has to wrap failures for transport itself.
+
     public nonisolated func setMessageHandler(name: String, handler: @escaping @Sendable () async throws -> Void) {
         listener.setMessageHandler(name: name) { (_: SwiftyXPC.XPCConnection) in
-            try await handler()
+            try await ServiceFailureTransport.wrappingFailures(requestIdentifier: name) {
+                try await handler()
+            }
         }
     }
 
     public nonisolated func setMessageHandler<Request: Codable>(name: String, handler: @escaping @Sendable (Request) async throws -> Void) {
         listener.setMessageHandler(name: name) { (_: SwiftyXPC.XPCConnection, request: Request) in
-            try await handler(request)
+            try await ServiceFailureTransport.wrappingFailures(requestIdentifier: name) {
+                try await handler(request)
+            }
         }
     }
 
     public nonisolated func setMessageHandler<Response: Codable>(name: String, handler: @escaping @Sendable () async throws -> Response) {
         listener.setMessageHandler(name: name) { (_: SwiftyXPC.XPCConnection) -> Response in
-            try await handler()
+            try await ServiceFailureTransport.wrappingFailures(requestIdentifier: name) {
+                try await handler()
+            }
         }
     }
 
     public nonisolated func setMessageHandler<Request: Codable, Response: Codable>(name: String, handler: @escaping @Sendable (Request) async throws -> Response) {
         listener.setMessageHandler(name: name) { (_: SwiftyXPC.XPCConnection, request: Request) -> Response in
-            try await handler(request)
+            try await ServiceFailureTransport.wrappingFailures(requestIdentifier: name) {
+                try await handler(request)
+            }
         }
     }
 

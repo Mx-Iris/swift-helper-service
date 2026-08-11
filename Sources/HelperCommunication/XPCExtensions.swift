@@ -10,9 +10,15 @@ extension SwiftyXPC.XPCConnection {
 }
 
 extension SwiftyXPC.XPCListener {
+    /// The one baseline every typed handler in the package goes through — `XPCHelperHandler`,
+    /// `HelperPeer*`'s typed `setMessageHandler`, and the peer handshake handlers all land
+    /// here. That is why failures only have to be wrapped for transport in this one place to
+    /// cover every `HelperService`, including ones written outside this package.
     package func setMessageHandler<Request: HelperCommunication.Request & Sendable>(requestType: Request.Type = Request.self, handler: @escaping (XPCConnection, Request) async throws -> Request.Response) {
         setMessageHandler(name: requestType.identifier) { (connection: XPCConnection, request: Request) -> Request.Response in
-            try await handler(connection, request)
+            try await ServiceFailureTransport.wrappingFailures(requestIdentifier: requestType.identifier) {
+                try await handler(connection, request)
+            }
         }
     }
 }
