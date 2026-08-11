@@ -10,6 +10,7 @@
 | # | 标题 | 状态 |
 |---|------|------|
 | [0001](0001-injection-strategy-attempt-not-predict.md) | 注入路径改为「先尝试后退回」，不再预测目标是否接受 dlopen | Implemented |
+| [0002](0002-service-errors-that-survive-xpc.md) | 服务端错误跨 XPC 保住描述，并在 daemon 侧留下日志 | Draft |
 
 ## 状态机
 

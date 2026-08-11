@@ -39,6 +39,10 @@
 - [0001 - 注入路径改为「先尝试后退回」，不再预测目标是否接受 dlopen](Evolutions/0001-injection-strategy-attempt-not-predict.md)
   —— 把 `InjectionService` 的选路从读 `CS_REQUIRE_LV` 预测，改为先试 `dlopen`、被拒再退回
   `mach_vm_remap`，并补上目标进程存活检查。含实测数据、被否方案，以及一节**验证覆盖与缺口**。
+- [0002 - 服务端错误跨 XPC 保住描述，并在 daemon 侧留下日志](Evolutions/0002-service-errors-that-survive-xpc.md)
+  —— 服务端抛的错到达调用方时只剩 domain + code，描述全丢；daemon 侧又无日志，失败两端不留痕。
+  在通道层统一包装成一个 `Codable` 的传输错误类型并记日志，所有现有服务一行不改即受益。**Draft，
+  待批准。**
 
 ### 其他
 
