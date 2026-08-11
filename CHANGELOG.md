@@ -6,6 +6,28 @@ source-breaking changes.
 
 This file starts at 0.2.0. Earlier releases are not covered.
 
+## [0.3.1] — 2026-08-11
+
+### Changed
+
+- **The MachInjector requirement is now `from: "0.5.0"`, up from `0.4.3`.** 0.4.3 crashes the target
+  on the `mach_vm_remap` path: it copied the payload as it looked *after* the injector's own
+  `dlopen`, so process-private state the Swift/ObjC runtime had written into `__DATA` (generic
+  metadata caches, `swift_once` flags, realized-class records) travelled into the target. Chained
+  fixups do not cover those words, so the injector's own pointers arrived intact in another process.
+  MachInjector 0.5.0 fixes it by restoring the payload's writable segments from its file before the
+  remap, and additionally reports a target killed mid-load instead of claiming success.
+
+  In practice a package resolving `swift-helper-service` 0.3.0 already got MachInjector 0.5.0,
+  because `from: "0.4.3"` is up-to-next-major and 0.5.0 was the newest 0.x — this release makes the
+  floor say what we actually require, rather than leaving a resolution that lands on 0.4.3 possible.
+  **A downstream that pins MachInjector to 0.4.x will now fail to resolve.** That is the intent: the
+  alternative is running the remap path with a known crash in it.
+
+  `InjectionService` keeps its own liveness check (`kill(pid, 0)` plus `ESRCH`) rather than relying
+  on MachInjector's new error code for the same condition. The check is pure POSIX and depends on
+  nothing upstream.
+
 ## [0.3.0] — 2026-08-11
 
 ### Changed
