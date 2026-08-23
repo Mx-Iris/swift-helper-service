@@ -18,6 +18,43 @@ public actor InjectionService: HelperService {
         static let remapEntrySymbolMissing = -2
         /// Injection reported success, but the target is no longer running.
         static let targetNoLongerRunning = -3
+        /// The payload is built for a different platform than the target.
+        static let payloadPlatformMismatch = -4
+        /// A cross-platform target refused a dlopen, and remap is not an option for it.
+        static let crossPlatformTargetRefusedDlopen = -5
+    }
+
+    /// This daemon's own platform, read once.
+    ///
+    /// It is the reference for "is the target running on a different platform
+    /// than we are" — read rather than assumed, because this same code builds
+    /// for macOS and Mac Catalyst, which are different platform values.
+    @MainActor
+    private static let daemonPlatform: UInt32? = MachOPlatform.ofProcess(getpid())
+
+    /// Why the remap fallback is or is not available for one injection.
+    ///
+    /// Three distinct answers that used to be one `Bool`. They read identically
+    /// at the branch and completely differently in a log, which is where this
+    /// matters: "did not fall back" with no reason attached is the kind of line
+    /// that costs an hour later.
+    private enum RemapFallback {
+        case allowed
+        case blockedByCallerPinnedStrategy
+        case blockedByCrossPlatformTarget
+
+        var isAllowed: Bool {
+            if case .allowed = self { return true }
+            return false
+        }
+
+        var logDescription: String {
+            switch self {
+            case .allowed: return "allowed"
+            case .blockedByCallerPinnedStrategy: return "not allowed (caller pinned a strategy)"
+            case .blockedByCrossPlatformTarget: return "not allowed (target runs on another platform)"
+            }
+        }
     }
 
     public init() {}
@@ -40,20 +77,25 @@ public actor InjectionService: HelperService {
     @MainActor
     private static func inject(request: InjectApplicationRequest) throws {
         let payloadPath = request.dylibURL.path
+        let targetPlatform = MachOPlatform.ofProcess(request.pid)
+
+        try requirePayloadMatchesTargetPlatform(
+            pid: request.pid,
+            payloadPath: payloadPath,
+            targetPlatform: targetPlatform
+        )
+
         let strategy = request.preferredStrategy
             ?? InjectionStrategy.initialAttempt(forTarget: request.pid, payloadPath: payloadPath)
 
-        // Falling back is only for a path this side chose. A caller that pinned
-        // one explicitly gets that path or an error — quietly rerouting would
-        // defeat the point of `preferredStrategy` being an escape hatch.
-        let mayFallBackToRemap = request.preferredStrategy == nil
+        let fallback = remapFallback(for: request, targetPlatform: targetPlatform)
 
         #log(
             .info,
             """
             Injecting \(payloadPath, privacy: .public) into pid \(request.pid, privacy: .public) \
             via \(strategy.rawValue, privacy: .public) \
-            (fallback to remap \(mayFallBackToRemap ? "allowed" : "not allowed", privacy: .public))
+            (fallback to remap \(fallback.logDescription, privacy: .public))
             """
         )
 
@@ -70,20 +112,119 @@ public actor InjectionService: HelperService {
                     pid \(request.pid, privacy: .public) refused a dlopen of \
                     \(payloadPath, privacy: .public): \(String(describing: error), privacy: .public) \
                     — \(error.localizedDescription, privacy: .public). \
-                    \(mayFallBackToRemap ? "Falling back to mach_vm_remap." : "Caller pinned dlopen, not falling back.", privacy: .public)
+                    Remap fallback: \(fallback.logDescription, privacy: .public).
                     """
                 )
-                guard mayFallBackToRemap else { throw error }
-                try injectViaRemap(request: request, payloadPath: payloadPath, dlopenFailure: error)
+                switch fallback {
+                case .allowed:
+                    try injectViaRemap(request: request, payloadPath: payloadPath, dlopenFailure: error)
+                case .blockedByCallerPinnedStrategy:
+                    throw error
+                case .blockedByCrossPlatformTarget:
+                    throw crossPlatformDlopenRefusalError(pid: request.pid, dlopenFailure: error)
+                }
                 return
             }
 
         case .machVirtualMemoryRemap:
+            // A caller can still pin remap for a cross-platform target. That is
+            // what an escape hatch is for, and refusing here would leave no way
+            // to exercise the path once it is fixed — but it is worth a line in
+            // the log, because the likely outcome is a dead target.
+            if case .blockedByCrossPlatformTarget = remapFallback(for: request, targetPlatform: targetPlatform) {
+                #log(.error, "pid \(request.pid, privacy: .public) runs on another platform and remap was pinned explicitly; this will most likely kill it")
+            }
             try injectViaRemap(request: request, payloadPath: payloadPath, dlopenFailure: nil)
             return
         }
 
         try requireTargetIsStillRunning(pid: request.pid, strategy: .dlopen)
+    }
+
+    /// Refuses a payload built for a different platform than its target.
+    ///
+    /// The host app already picks the payload slice per target platform, so
+    /// reaching this means something upstream is wrong. It is still checked
+    /// here, because getting it wrong is not a recoverable error: dyld refuses
+    /// the mismatched slice, and the remap fallback then projects it in anyway,
+    /// which the kernel kills the target for. A refusal costs one failed
+    /// injection; not refusing costs the target process.
+    ///
+    /// An unreadable platform on either side is *not* treated as a mismatch. A
+    /// guard that blocks whenever it cannot see clearly would turn every
+    /// unparseable target into an injection failure, and this is a second line
+    /// of defence rather than the decision itself.
+    @MainActor
+    private static func requirePayloadMatchesTargetPlatform(
+        pid: pid_t,
+        payloadPath: String,
+        targetPlatform: UInt32?
+    ) throws {
+        guard let targetPlatform,
+              let payloadPlatform = MachOPlatform.ofFile(atPath: payloadPath),
+              targetPlatform != payloadPlatform
+        else { return }
+
+        throw makeError(
+            code: ErrorCode.payloadPlatformMismatch,
+            description: """
+            The payload at \(payloadPath) is built for platform \(payloadPlatform), but process \(pid) \
+            runs on platform \(targetPlatform). dyld would refuse it. These values are \
+            LC_BUILD_VERSION platforms: 1 is macOS, 6 Mac Catalyst, 7 iOS Simulator, 8 tvOS \
+            Simulator, 9 watchOS Simulator. Note that a mismatch is invisible in the architecture \
+            — on Apple silicon both sides are arm64 — and that one fat binary cannot carry both, \
+            which is why the payload ships as a separate bundle per platform.
+            """
+        )
+    }
+
+    /// Whether this injection may fall back to remap, and why not when it may not.
+    @MainActor
+    private static func remapFallback(
+        for request: InjectApplicationRequest,
+        targetPlatform: UInt32?
+    ) -> RemapFallback {
+        // Falling back is only for a path this side chose. A caller that pinned
+        // one explicitly gets that path or an error — quietly rerouting would
+        // defeat the point of `preferredStrategy` being an escape hatch.
+        guard request.preferredStrategy == nil else { return .blockedByCallerPinnedStrategy }
+
+        // The remap path resolves the symbols it needs in *this* process and
+        // hands those addresses to the target. That holds for another macOS
+        // process, which maps the same shared cache at the same slide. It does
+        // not hold for a target on another platform: an iOS Simulator process
+        // is loaded by dyld_sim against the simulator runtime's own shared
+        // cache, so an address from here lands on unrelated memory and the
+        // target dies the moment it jumps there. Reporting the dlopen refusal
+        // honestly is strictly better than that.
+        //
+        // The dlopen path itself is fine — it resolves against the target's own
+        // symbol table (MITargetSymbolResolver) — which is why only the
+        // fallback is blocked here and not the injection.
+        if let targetPlatform, let daemonPlatform, targetPlatform != daemonPlatform {
+            return .blockedByCrossPlatformTarget
+        }
+        return .allowed
+    }
+
+    /// The error for a cross-platform target that refused a `dlopen`.
+    ///
+    /// Carries the target's own refusal — that text is the actionable part —
+    /// plus the reason no fallback was attempted, so the absence of a second
+    /// attempt does not read like a bug.
+    private static func crossPlatformDlopenRefusalError(pid: pid_t, dlopenFailure: any Error) -> NSError {
+        makeError(
+            code: ErrorCode.crossPlatformTargetRefusedDlopen,
+            description: """
+            Process \(pid) refused to load the payload: \(dlopenFailure.localizedDescription)
+
+            It runs on a different platform than this daemon — an iOS Simulator process, or another \
+            simulator runtime — so the mach_vm_remap fallback was deliberately not attempted. That \
+            path resolves symbols in this process and hands the addresses to the target, which is \
+            valid only for a target sharing this machine's shared cache. For a process running \
+            under dyld_sim it lands on unrelated memory and kills it.
+            """
+        )
     }
 
     /// Projects the payload into the target with `mach_vm_remap`.
