@@ -138,9 +138,7 @@ let package = Package(
             ),
             remote: .package(
                 url: "https://github.com/MxIris-Reverse-Engineering/MachInjector",
-                // 0.5.0, not 0.4.3: the remap path crashes the target on 0.4.3.
-                // See the MachInjector entry in AGENTS.md.
-                from: "0.5.0",
+                from: "0.5.1",
             ),
         ),
         .package(
