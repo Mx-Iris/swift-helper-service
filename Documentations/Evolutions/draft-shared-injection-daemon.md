@@ -234,9 +234,14 @@ arm64e」。这句话对 `swift build` 成立，对 `xcodebuild` 不成立：`Lo
    `HelperClient.fetchToolVersion()`（走 `FetchVersionRequest`）取版本号比较。这对本提案成立的前提
    是共享 daemon 从第一版起就带 `FetchVersionRequest`，不存在「老到不认识这条消息」的区间。
 
-6. **标准回传通道。** 平台提供一条默认通道：XPC 优先，沙盒目标退回本地 TCP。**端口由 payload 绑
-   0 让内核分配，再经已有的端点注册表上报给宿主** —— 不写分配器，不硬编码端口段，两个工具同时注入
-   同一进程也不会撞。payload 侧以 Swift 库形式交付（`HelperPeer` 之上的薄层）。
+6. **标准回传通道。** 平台提供一条默认通道：XPC 优先，沙盒目标退回本地 TCP。payload 侧以 Swift 库
+   形式交付（`HelperPeer` 之上的薄层）。
+
+   ~~端口由 payload 绑 0 让内核分配，再经已有的端点注册表上报给宿主。~~ **这条在实现时被推翻** ——
+   沙盒目标的 payload 连不上 daemon（`mach-lookup` 正是被挡的那一跳），所以「经注册表上报」无从谈起；
+   文件也不行，沙盒 App 与宿主没有共享目录。改为 RuntimeViewer 已在生产验证的做法：**角色反转**
+   （宿主监听、payload 连出，因为沙盒进程可以向 localhost 外连，但没人能发现它 bind 的端口），
+   **端口由两边从同一个 identifier 确定性推导**，谁都不用告诉谁。详见决策日志。
 
 7. **payload 校验而非托管。** 平台不负责 payload 的存储与分发（三种现有方式各留各的），但在注入前
    校验架构切片、platform 与签名，不合格直接拒绝并给出能照着改的错误 —— 把「切片不对导致目标静默
@@ -282,28 +287,47 @@ public enum PayloadValidationFailure: Codable, Sendable, Equatable {
 }
 ```
 
-端点注册表需要容纳 TCP 回退的端口号。`InjectedEndpointInfo` 现有四个字段
-（`pid` / `appName` / `bundleIdentifier` / `endpoint`），按只增不改原则追加一个可选字段：
+~~端点注册表需要容纳 TCP 回退的端口号，`InjectedEndpointInfo` 追加一个可选的 `localSocketPort`。~~
+
+**这个字段不需要了，而且加了也没用。** 退回 socket 的前提恰恰是 payload 连不上 daemon，所以它没有
+任何办法把端口写进注册表。端口改由两边各自推导（见下节），谁都不必转达，注册表因此一个字段都不用动。
+
+### 标准通道的选路（已实现）
+
+~~payload 侧库在握手时自行判定，宿主不参与。~~ **两边都要判定，而且必须判出同一个答案** —— 因为
+需要协商的那个场景，恰恰是没有通道可供协商的场景。
 
 ```swift
-/// payload 监听的本地 TCP 端口，仅当它判定 XPC 不可用、退回 socket 时非 nil。
-/// 端口由 payload 绑 0 交给内核分配，这里只是转达实际结果。
-public let localSocketPort: UInt16?
-```
+public enum PeerTransport: Sendable, Equatable {
+    case brokeredXPC                  // 默认：经 tool 的注册表交换端点后直连
+    case loopbackSocket(port: UInt16) // 宿主监听、payload 连出
+}
 
-### 标准通道的选路
-
-payload 侧库在握手时自行判定，宿主不参与：
-
-```swift
-public enum PayloadTransport: Sendable {
-    case xpc                       // 默认
-    case localSocket(port: UInt16) // seatbelt 挡住 mach-lookup 时
+public enum PeerTransportSelection {
+    /// 宿主在注入前问目标 pid，payload 进去之后问 getpid() —— 同一个问题，同一个答案。
+    public static func transport(
+        forProcess processIdentifier: pid_t,
+        machServiceName: String,
+        channelIdentifier: String
+    ) -> PeerTransport
 }
 ```
 
-判定依据沿用 RuntimeViewer 已验证的做法 —— 尝试 mach-lookup，被 seatbelt 拒绝则退回 socket。两条路
-之上是同一套 `Request` / `Response` 类型化消息，调用方看不出走的是哪条。
+判定依据沿用 RuntimeViewer 已验证的做法：`sandbox_check` 探 `mach-lookup`（而不是嗅 entitlement
+—— 挡住它的两种沙盒形态从外面长得不一样）。两条路之上是同一套 `Request` / `Response` 类型化消息，
+调用方看不出走的是哪条。
+
+**三处容易想当然、但会致命的地方：**
+
+- **socket 路径上角色是反的**：宿主监听、payload 连出。沙盒进程可以向 localhost 外连，但没有任何人
+  能发现它 bind 了哪个端口。让宿主监听，就把「通报一个端口」变成了「约定一个端口」。
+- **端口推导用 djb2，不能用 `Hasher`**。`Hasher` 每进程带不同的种子，两边会算出不同端口然后互相干等
+  —— 而这个错误只在跨进程时才显形。测试里独立重算了一遍期望值来钉住它。
+- **identifier 必须含目标 pid**，否则同时注入两个进程会撞到同一个端口，第二个 listener 直接 bind 失败。
+
+另有一个实现时才暴露的坑：`sandbox_check` 对**内核找不到的 pid 回答「拒绝」而不是报错**。照字面处理
+会把已退出或不存在的目标推上 socket 路径去无限等待，而 XPC 路径至少会明确失败。所以探测前先确认进程
+存在（按 `ESRCH` 判，因为属于别的用户的活进程回的是 `EPERM`，那不是跳过探测的理由）。
 
 ### 开发模式的存放
 
@@ -453,8 +477,12 @@ SwiftyXPC 一旦开始回复，该测试就会失败，判别器随即恢复可�
    另外把「选哪个切片」的推断从文件读取里拆出来（`preferredExecutingArchitecture(from:)`），否则它
    只能靠机器上恰好存在的二进制来测——实测 `/bin/ls` 是 `x86_64 arm64e`，没有纯 arm64 切片，而
    `/usr/lib/libobjc.A.dylib` 在磁盘上根本不存在（已并入 dyld shared cache），这两条都写进了测试。
-6. **标准回传通道。** payload 侧 Swift 库：XPC 优先、seatbelt 挡住则绑 0 取端口退回本地 socket、
-   经端点注册表上报。`InjectedEndpointInfo` 追加 `localSocketPort`。
+6. **[进行中]** **标准回传通道。**
+   - **[已完成]** 选路与端口推导：C 侧的 `mach-lookup` 探测、`PeerTransport` / `PeerTransportSelection`
+     / `PeerPortDerivation`，以及 9 个测试（全量 66 个通过）。原定的「绑 0 + 经注册表上报」在此被
+     推翻，改为角色反转 + 确定性推导，理由见上文「标准通道的选路」。`InjectedEndpointInfo` 不动。
+   - **[待做]** socket 传输层本身：宿主侧 listener、payload 侧 connect、消息分帧，以及把两条传输
+     收到同一套 `Request` / `Response` 之下。
 7. **抽出 `HookKit`。** 从 `InjectionScaffold` 模板搬进平台客户端库，保留它现有的签名校验、多候选
    拼写与原子安装语义。
 8. **菜单栏管理界面。** daemon 状态、已注入进程列表（只读 + 退出目标 App）、开发模式警告、升级入口
@@ -502,4 +530,7 @@ SwiftyXPC 一旦开始回复，该测试就会失败，判别器随即恢复可�
 | 2026-10-27 | 生成出来的 payload target 保留，重新定位为平台自带的**参考载荷**，而不是删除 | 本会话没有 Xcode MCP 与 xcodeproj MCP，从 pbxproj 删一个 target 要同步改八九个 section，漏一处就打不开工程。而保留它还有正面价值：脚手架的 bring-up 顺序里本就有「先证明 payload 能挂上、此时不声明任何 hook」这一环，平台需要它把「平台自身有没有问题」与「客户端有没有问题」分开，端到端验证那一步也用得上 |
 | 2026-10-27 | 平台 daemon 不挂 `FilesService` | 脚手架挂它是为了把 payload 放进 `/Library`（那确实要 root）。但本提案已决定平台不托管 payload 存储，客户端自备路径、daemon 只校验，于是它没有存在理由。去掉后 daemon 里剩下的每一样都离不开 root |
 | 2026-10-27 | 去掉客户端侧的注入路径开关，`preferredStrategy` 传 `nil` | 生成出来的代码有个 `InjectionMethod` 开关，两条路各发一条消息——那正是[提案 0001](0001-injection-strategy-attempt-not-predict.md) 要消除的「客户端侧的第二份规则」。daemon 持有 task port、能探测目标，让它决定；入口符号则总是带上，因为只有 daemon 知道会不会用到 remap |
+| 2026-10-27 | ~~TCP 端口由 payload 绑 0 交内核分配、经端点注册表上报~~ → **角色反转（宿主监听、payload 连出）+ 两边从同一 identifier 确定性推导端口** | 原方案在实现时被证明不成立，而且是两处同时不成立：退回 socket 的前提就是 payload 连不上 daemon（`mach-lookup` 正是被挡的那一跳），所以它无从上报；而文件也不是出路——沙盒 App 与宿主没有共享目录，RuntimeViewer 正因此放弃了文件式端口发现。改用它已在生产验证的做法。代价是推导出的端口可能与无关软件相撞，且两条传输的角色相反、抽象起来更麻烦 |
+| 2026-10-27 | 端口推导用 djb2，明确不用 `Hasher` | `Hasher` 每进程种子不同，两边会算出不同端口并互相干等，而这个错误只在跨进程时显形。测试独立重算期望值钉住该算法 |
+| 2026-10-27 | 探测 `mach-lookup` 前先确认进程存在 | `sandbox_check` 对内核找不到的 pid 回答「拒绝」而非报错，照字面处理会把已退出的目标推上 socket 路径无限等待。按 `ESRCH` 判断，使属于其他用户的活进程（回 `EPERM`）仍被正常探测。这个缺陷是测试发现的 |
 | 2026-10-27 | 平台 App 暂时以本地 path 依赖指向本功能分支的 worktree，并用 `.package(name:path:)` 显式指定 identity | 它需要本分支新增的注册表清理与 `requireToolVersion`，而这些尚未发版。`name:` 不是装饰：SwiftPM 按目录 basename 推断 path 依赖的 identity，而 worktree 目录名按约定带后缀，不指定就全部解析失败。**本分支合并发版后必须换成版本依赖** |
