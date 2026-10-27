@@ -533,10 +533,30 @@ SwiftyXPC 一旦开始回复，该测试就会失败，判别器随即恢复可�
    status bar window 均在，日志里有对应的一行。**菜单栏上肉眼可见、以及点开之后菜单长什么样，没有
    验证** —— 本机未授予终端屏幕录制权限，`screencapture` 取不到画面，而状态栏项不出现在
    `CGWindowListCopyWindowInfo` 里（系统合成，不是每个 App 自己的窗口），所以探针问不出这件事。
-9. **迁移 `ViewHierarchyCapture`。** 改为 Xcode workspace 结构（现有 SwiftPM 包保留，新增 payload 的
-   Xcode project）；payload **只换通信层** —— 已验证的 Objective-C 逻辑（Xcode 组件加载、phase 序列、
-   gzip 解压）原样保留，外面加一层 Swift 接 `HelperPeer`，删掉交换目录与轮询；删掉 `sudo` 路径。
-   同时更正其提案中关于 payload 切片的论断。
+9. **[已完成]** **迁移 `ViewHierarchyCapture`。** 分支 `feature/shared-injection-platform-client`。
+   新增 `ViewHierarchyCapture.xcworkspace` 与 `ViewHierarchyCapturePayload.xcodeproj`（只有一个
+   framework target），SwiftPM 包保留并接管全部源码；payload **只换通信层** —— 已验证的 Objective-C
+   逐行未改，外面加 `ViewHierarchyCapturePayloadCore` 接 `PeerLink`；删掉交换目录、轮询与 `sudo`
+   路径。全量 49 个测试通过（新增 `ViewHierarchyCaptureInterfaceTests` 5 个）。
+
+   **更正了提案 0001 关于 payload 切片的论断。** 原文说「SwiftPM 不支持 arm64e，所以 payload 这一层
+   出不了 SwiftPM；Swift 本身也不正式支持 arm64e」—— 前半句属实，后半句不成立：Xcode 项目用项目级
+   `ARCHS` 构建本地包的 target，`iOSPackagesShouldBuildARM64e` 把这一点延伸到包。实测产物
+   `x86_64 arm64 arm64e` 且含 Swift。当时这个推断没有代价（payload 不需要 Swift），迁移之后回传通道
+   是 Swift 的，它才成为障碍。
+
+   三处落地时才清楚的事实：
+
+   - **捕获结果必须经通道回传，不能给路径。** 沙盒目标与客户端之间没有共同目录 —— 这正是原方案一直
+     没真正跑通的那一格。payload 写进自己的临时目录，再把 `[相对路径: Data]` 发回去。
+   - **嵌进 CLI 的 payload 从 336 KB 涨到 9.6 MB**（带上 Swift 回传层），而那份 base64 是提交进仓库的
+     源码。去 x86_64 切片 + strip + raw DEFLATE 压到 1.5 MB。
+   - **strip 之后必须 ad-hoc 重签。** strip 重写镜像使 Xcode 的签名失效，而落地步骤 5 加的那条检查会
+     拒绝「声称有签名却验不过」的 payload。不重签的话每次注入都会被拒，而错误信息说的是签名，不是
+     导致它的瘦身。
+
+   顺带修掉 `main` 上一个既有的编译失败：`MachOPlatformReader.platforms` 里局部 `let platforms` 遮蔽了
+   同名静态方法，编译器报的是「failed to produce diagnostic for expression」。
 10. **端到端验证。** 对 AppKit 靶子（已有 `probe-target`）与一个 arm64e 系统 App 各跑一次，两条注入
     路径都试。这一步解掉 `ViewHierarchyCapture` 积压的四项验证。
 11. **`InjectionScaffold` 加开关。** 默认生成连平台的客户端形态，参数可切回自带 daemon 的形态。
