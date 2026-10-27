@@ -90,6 +90,11 @@ public actor HelperPeerClient: PeerConnection {
         self.stateContinuation = capturedContinuation
         capturedContinuation.yield(.connecting)
 
+        // `nil` is required here, not an oversight. A peer listener is reached only by whoever
+        // was handed its endpoint through the tool's registry, and the process on the other end
+        // is an arbitrary third-party app the payload was injected into — its signature cannot be
+        // known in advance, so there is no requirement that would admit it. Access control for
+        // this hop lives at the registry, which is behind the tool's own requirement.
         let listener = try SwiftyXPC.XPCListener(type: .anonymous, codeSigningRequirement: nil)
         self.listener = listener
 
@@ -130,6 +135,11 @@ public actor HelperPeerClient: PeerConnection {
         self.stateContinuation = capturedContinuation
         capturedContinuation.yield(.connecting)
 
+        // `nil` is required here, not an oversight. A peer listener is reached only by whoever
+        // was handed its endpoint through the tool's registry, and the process on the other end
+        // is an arbitrary third-party app the payload was injected into — its signature cannot be
+        // known in advance, so there is no requirement that would admit it. Access control for
+        // this hop lives at the registry, which is behind the tool's own requirement.
         let listener = try SwiftyXPC.XPCListener(type: .anonymous, codeSigningRequirement: nil)
         self.listener = listener
 

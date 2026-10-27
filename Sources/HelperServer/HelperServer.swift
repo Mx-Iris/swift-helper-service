@@ -16,13 +16,32 @@ public actor HelperServer {
 
     private var toolConnection: SwiftyXPC.XPCConnection?
 
-    public init(serverType: HelperServerType, version: String, services: [HelperService]) async throws {
+    /// - Parameter codeSigningRequirement: A code signing requirement string every connecting
+    ///   client must satisfy, in the same language `SecRequirementCreateWithString` takes — for
+    ///   example `anchor apple generic and certificate leaf[subject.OU] = "TEAMID123"`.
+    ///
+    ///   `nil`, the default, **accepts any process on the machine**. For a tool installed by one
+    ///   app and used only by that app, that is survivable: the tool's Mach service name is
+    ///   obscure and the damage is bounded by what the tool does. For a tool shared across
+    ///   clients it is not — a daemon that injects code into arbitrary processes and accepts
+    ///   requests from anyone is a complete local privilege escalation primitive. **Shared tools
+    ///   must pass a requirement.**
+    ///
+    ///   It is fixed for the listener's lifetime: `XPCListener` takes it at construction, and
+    ///   there is no way to tighten or relax it afterwards. A daemon that wants to switch
+    ///   (say, to accept locally-signed builds while developing) has to restart to do it.
+    public init(
+        serverType: HelperServerType,
+        version: String,
+        codeSigningRequirement: String? = nil,
+        services: [HelperService]
+    ) async throws {
         self.serverType = serverType
         switch serverType {
         case .plain:
-            self.listener = try SwiftyXPC.XPCListener(type: .anonymous, codeSigningRequirement: nil)
+            self.listener = try SwiftyXPC.XPCListener(type: .anonymous, codeSigningRequirement: codeSigningRequirement)
         case .machService(let name):
-            self.listener = try SwiftyXPC.XPCListener(type: .machService(name: name), codeSigningRequirement: nil)
+            self.listener = try SwiftyXPC.XPCListener(type: .machService(name: name), codeSigningRequirement: codeSigningRequirement)
         }
         let services = [MainService(version: version)] + services
         self.services = services

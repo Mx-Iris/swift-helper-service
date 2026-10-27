@@ -10,6 +10,24 @@ This file starts at 0.2.0. Earlier releases are not covered.
 
 ### Added
 
+- **`HelperServer.init` takes a `codeSigningRequirement`.** It was hard-coded to `nil`, which
+  accepts any process on the machine. That is survivable for a tool installed by one app and used
+  only by that app; it is not for a tool shared between clients, where a daemon that injects code
+  into arbitrary processes and takes requests from anyone is a complete local privilege escalation
+  primitive.
+
+  The parameter is optional and defaults to `nil`, so existing call sites are unaffected — but a
+  shared tool should pass one, e.g.
+  `anchor apple generic and certificate leaf[subject.OU] = "TEAMID123"`.
+
+  `XPCListener` fixes the requirement at construction, so a daemon cannot tighten or relax it
+  while running; switching means restarting.
+
+  The three anonymous listeners in `HelperPeer` keep `nil` deliberately, and now say why: the
+  process on the other end of a peer connection is whatever third-party app the payload was
+  injected into, so its signature cannot be known in advance. Access control for that hop is the
+  registry, which sits behind the tool's own requirement.
+
 - **`HelperToolVersion` and `HelperClient.requireToolVersion(atLeast:)`.** Ask the tool whether it
   is new enough, rather than trying to infer it from a failure —
   `HelperClient.errorIndicatesOutdatedPeer(_:)` cannot return `true`, so an outdated tool is
