@@ -109,6 +109,50 @@ payload 映射为可执行。这是**唯一**仍然直接决定走 remap 路径�
 
 - **延伸阅读**：[WireCompatibility.md](Architecture/WireCompatibility.md)
 
+### 平台 daemon（platform daemon）
+
+**全机唯一的那个特权注入 daemon**，由 [Injection
+Platform](https://github.com/Mx-Iris/InjectionPlatform) App 安装，用户在「登录项」里批准一次，此后
+本机所有注入工具都作为客户端连它。
+
+与「tool」的区别在于归属而不是技术：tool 泛指任何特权助手，平台 daemon 特指这一个被共享的实例。它
+的客户端**不得**安装、卸载或升级它 —— 那会重启它，于是别的客户端到它们 payload 的通道全部断掉，而
+payload 卸载不掉，每个受影响的目标都得重启。
+
+- **主要出现在**：`InjectionServiceIdentity.machServiceName`（在每个客户端项目里）
+- **延伸阅读**：[SharedDaemonClients.md](Guides/SharedDaemonClients.md)
+
+### 标准通道（standard channel）
+
+宿主与它注入进去的 payload 之间那条直连链路，以及选择它的那套机制。有两种实现，由目标的沙盒状态
+决定，调用方不需要知道选中的是哪种：
+
+- **brokered XPC** —— 两端经 tool 的注册表交换匿名 endpoint，然后直连。
+- **loopback socket** —— 沙盒目标用这条，因为它查不到 tool 的 Mach service。**角色是反的**：宿主
+  监听，payload 拨号 —— 沙盒进程可以向 localhost 拨出，但它绑的端口没人能发现。端口两边各自推导，
+  不协商。
+
+两端必须算出同一个答案，所以那段计算收在 `PeerLink` 一处。宿主选 XPC 而 payload 选 socket 不会报错，
+只会挂住。
+
+- **主要出现在**：`Sources/HelperPeer/PeerLink.swift`、`PeerTransport.swift`
+- **延伸阅读**：[BrokeredPeer.md 第七节](Architecture/BrokeredPeer.md)
+
+### 开发模式（developer mode）
+
+平台 daemon 上的一个开关：打开之后它**不再验证调用方的签名**，接受本机任何进程的请求。
+
+给的是签名要求满足不了的那些客户端用的 —— ad-hoc 签名的产物、没有签名证书的机器、团队外的客户端。
+**日常 Xcode 开发不需要它**：设了 `DEVELOPMENT_TEAM` 的项目，连 Debug 构建都由 Apple Development
+证书签名，leaf 的 OU 就是 Team ID，本来就满足。
+
+它是一个真实的权限提升面，所以界面要同时说出**两件事**：磁盘上的开关状态，和**正在跑的 daemon 是否
+真的在验**。`XPCListener` 的要求在构造时定死，所以切换之后两者在 daemon 重启前不一致 —— 合成一个
+布尔值就一定会在某个方向上撒谎。
+
+- **主要出现在**：`DaemonTrustConfiguration`、`DeveloperModeService`（在平台仓库里）
+- **延伸阅读**：[SharedDaemonClients.md 第三节](Guides/SharedDaemonClients.md)
+
 ### 两阶段激活（two-phase activation）
 
 `HelperPeerClient` / `HelperPeerServer`（以及 `HelperServer`）刻意把生命周期切成 `init` 和

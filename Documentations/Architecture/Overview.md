@@ -173,11 +173,11 @@ XPC 类型放进业务消息时，用 `HelperPeerEndpoint` 这个不透明包装
 
 这些都不影响当前用法，但改动相关代码时值得先知道。
 
-另有四处已在提案
-[draft - 一个共享的注入 daemon](../Evolutions/draft-shared-injection-daemon.md) 的清理批次里修掉：
-`HelperServerType.plain` 那个从未被读取的 `name` 参数（现为 `.plain(identifier:)`，旧拼写保留为
-废弃的静态工厂）、无人调用的 `HelperService.run()` 协议要求、死代码 `HelperTool`，以及
-`MainService` 注册表只增不减 —— 它现在按注册方 pid 挂 `DispatchSourceProcess`，进程退出即清除，
+四处原本列在这里的问题已在提案
+[draft - 一个共享的注入 daemon](../Evolutions/draft-shared-injection-daemon.md) 的清理批次里修掉，
+因此从上表移除：`HelperServerType.plain` 那个从未被读取的 `name` 参数（现为 `.plain(identifier:)`，
+旧拼写保留为废弃的静态工厂）、无人调用的 `HelperService.run()` 协议要求、死代码 `HelperTool`，
+以及 `MainService` 注册表只增不减 —— 它现在按注册方 pid 挂 `DispatchSourceProcess`，进程退出即清除，
 与 `InjectedEndpointRegistryService` 一致。
 
 ## 九、延伸阅读
@@ -186,6 +186,8 @@ XPC 类型放进业务消息时，用 `HelperPeerEndpoint` 这个不透明包装
 |---|---|---|
 | [ModuleLayering.md](ModuleLayering.md) | 模块怎么切、可见性为什么这么定、Interface/Implementation 拆分的规矩 | 新增一个服务、或想把某个 `package` 放开成 `public` 之前 |
 | [TypedMessaging.md](TypedMessaging.md) | `Request`/`Response` 协议层的设计，identifier 作为路由键，为什么不用 `NSXPCInterface` | 新增一种消息、或排查「消息发出去没人接」时 |
-| [BrokeredPeer.md](BrokeredPeer.md) | `HelperPeer` 的握手/重连协议，两阶段生命周期为什么必须存在 | 用 `HelperPeerClient` / `HelperPeerServer`，或排查握手竞态时 |
+| [BrokeredPeer.md](BrokeredPeer.md) | `HelperPeer` 的握手/重连协议，两阶段生命周期为什么必须存在，沙盒目标为什么用不了它、改走 loopback socket | 用 `HelperPeerClient` / `HelperPeerServer` / `PeerLink`，或排查握手竞态时 |
+| [HookKit.md](HookKit.md) | 替换宿主进程里的 Objective-C 方法：类型编码校验、多候选拼写、全或无、「装上了 ≠ 跑起来了」 | 写 payload 的 hook，或某个 hook 装上了却没生效时 |
+| [SharedDaemonClients.md](SharedDaemonClients.md) | 怎么写一个共享注入 daemon 的客户端：装什么、签名要满足什么、payload 校验会拒绝什么、开发模式在干什么 | 把一个工具接到共享 daemon 上之前 |
 | [WireCompatibility.md](WireCompatibility.md) | 「只增不改」的承诺、哪些东西已经是线格式、版本协商为什么必须主动问 | 动任何 `Request`、`identifier`、`errorDomain` 或 `rawValue` 之前 |
 | [Evolutions/](../Evolutions/README.md) | 每次实质变更的提案（决策过程、被否方案、实测数据） | 想知道「当初为什么这么改」 |

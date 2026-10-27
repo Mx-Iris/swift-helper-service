@@ -557,11 +557,55 @@ SwiftyXPC 一旦开始回复，该测试就会失败，判别器随即恢复可�
 
    顺带修掉 `main` 上一个既有的编译失败：`MachOPlatformReader.platforms` 里局部 `let platforms` 遮蔽了
    同名静态方法，编译器报的是「failed to produce diagnostic for expression」。
-10. **端到端验证。** 对 AppKit 靶子（已有 `probe-target`）与一个 arm64e 系统 App 各跑一次，两条注入
-    路径都试。这一步解掉 `ViewHierarchyCapture` 积压的四项验证。
-11. **`InjectionScaffold` 加开关。** 默认生成连平台的客户端形态，参数可切回自带 daemon 的形态。
-12. **收尾判断**（结论写进决策日志）：使用指南与实现说明各写一份（第九节「文档与示例」已列出内容）；
-    新术语「平台 daemon」「标准通道」「开发模式」需登记进术语表。
+10. **[受阻]** **端到端验证。** 对 AppKit 靶子与一个 arm64e 系统 App 各跑一次 —— **没能做。**
+
+    **卡点**：共享 daemon 必须由用户在「系统设置 › 通用 › 登录项」批准，`SMAppService.register()`
+    触发的是一个只能由人完成的授权。agent 做不了这一步，也不该替用户做。换言之卡点从
+    `ViewHierarchyCapture` 原来的「`sudo` 要交互输密码」换成了「登录项要人批准」，并没有消失。
+
+    **在这个边界之内验证到的：**
+
+    - 平台 App 构建通过；daemon 与 payload 均为 `x86_64 arm64 arm64e`，App 为 `x86_64 arm64`，
+      launchd plist 的 `Label` / `BundleProgram` / `MachServices` 三处一致。
+    - `vhcapture` 对一个真实目标（Finder）跑到 daemon 那一跳：目标分型正确（`native,
+      com.apple.finder`）、Xcode 解析正确、连不上 daemon 时给出的是「装平台 App 并在登录项批准」
+      而不是一条 XPC 错误码。
+    - 脚手架两种形态都生成并**构建**通过（不只是生成）。
+    - 全量测试：`swift-helper-service` 101 个、`ViewHierarchyCapture` 53 个。
+
+    **这一步顺带发现并修掉一个必然导致全部注入失败的缺陷**：平台的 `PayloadInjectionCoordinator`
+    仍在用 `FileOperationRequest` 把 payload 拷进 `/Library`，而共享 daemon 刻意不挂 `FilesService`
+    （落地步骤 3 定的）。每一次注入都会在 staging 这一步失败，错误信息是「无法识别的消息」，离真正
+    的原因很远。改为直接从 App bundle 注入。这正是端到端验证该抓的那类问题 —— 它被抓到了，只是靠
+    读代码而不是靠跑起来。
+
+    **剩下的四项仍然积压**，清单见 `ViewHierarchyCapture` 的
+    `Documentations/Internal/PayloadAndInjection.md#验证到哪一步了`。
+11. **[已完成]** **`InjectionScaffold` 加开关。** 分支 `feature/platform-client-form`。
+    `generate.sh --form platform-client|standalone-daemon`，默认前者。客户端形态没有 daemon target、
+    没有 `HookKit` 副本（改依赖 `swift-helper-service` 的 product）、界面上 daemon 那一节只读。
+    两种形态都生成并**构建**通过。
+
+    **一处对提案的偏离，方向是减少重复**：提案写的是「两套模板都要维护 —— 这是明确接受的代价」。
+    落地时改为**一棵模板 + 一层覆盖**（`TemplateOverlays/PlatformClient/`）。两种形态真正不同的只有
+    八个文件，相同的有四十来个；复制四十个去让八个不同，代价不是磁盘而是**那四十个会慢慢变得不
+    一样，而且两边各自都能构建**。外部行为不变。维护约定写进了
+    `Documentations/Guides/MaintainingTheTwoForms.md`。
+
+    **一个值得记下来的坑**：从 pbxproj 里删 target 不能按行过滤「含某个 id 的行」。
+    `TargetAttributes` 里的条目是嵌套对象，只删掉开头那行会留下孤儿行，Xcode 报的是「project is
+    damaged … parse error」，不说在哪 —— 而且**生成这一步完全看不出来**，只有 `xcodebuild -list`
+    或真正构建才会暴露。必须按块删，数花括号时还要跳过引号里的内容（那个生成 plist 的 `shellScript`
+    字符串里全是 `${…}`）。第一次就是这么错的。
+
+    客户端形态依赖 **0.4.0** —— 第一个带 `HookKit` 与 `PeerLink` 的版本。在它发布之前生成出来的项目
+    解析不了依赖，`generate.sh` 会在结尾说明这件事。
+12. **[已完成]** **收尾。** 使用指南
+    [SharedDaemonClients.md](../Guides/SharedDaemonClients.md)（客户端怎么接入：装什么、签名要求、
+    开发模式、注入请求、payload 放哪、daemon 会拒绝什么、通道的两条顺序规矩、哪些部分还没验过）与
+    实现说明 [Arm64eInjection.md](../Architecture/Arm64eInjection.md)（注入器与 payload 为什么都要
+    arm64e，六处配置各自在挡什么）各一份，均已登记进文档索引。术语表新增「平台 daemon」「标准通道」
+    「开发模式」三条。架构总览第八节里被清理掉的四项已从表中移除。
 
 ## 决策日志
 
@@ -600,3 +644,9 @@ SwiftyXPC 一旦开始回复，该测试就会失败，判别器随即恢复可�
 | 2026-10-27 | 端口推导用 djb2，明确不用 `Hasher` | `Hasher` 每进程种子不同，两边会算出不同端口并互相干等，而这个错误只在跨进程时显形。测试独立重算期望值钉住该算法 |
 | 2026-10-27 | 探测 `mach-lookup` 前先确认进程存在 | `sandbox_check` 对内核找不到的 pid 回答「拒绝」而非报错，照字面处理会把已退出的目标推上 socket 路径无限等待。按 `ESRCH` 判断，使属于其他用户的活进程（回 `EPERM`）仍被正常探测。这个缺陷是测试发现的 |
 | 2026-10-27 | 平台 App 暂时以本地 path 依赖指向本功能分支的 worktree，并用 `.package(name:path:)` 显式指定 identity | 它需要本分支新增的注册表清理与 `requireToolVersion`，而这些尚未发版。`name:` 不是装饰：SwiftPM 按目录 basename 推断 path 依赖的 identity，而 worktree 目录名按约定带后缀，不指定就全部解析失败。**本分支合并发版后必须换成版本依赖** |
+| 2026-10-27 | `MenuBarExtra` 装不进 `NSHostingSceneRepresentation`，状态栏项改回 AppKit `NSStatusItem` | 实测：托管场景里声明一个，状态栏项从未被创建。与该类的文档一致 —— 它持有的场景是被**呈现**的，而 `MenuBarExtra` 不由任何人呈现。设置窗口仍是托管的 SwiftUI `Window`，与原要求一致 |
+| 2026-10-27 | `@main` 贴在 `NSApplicationDelegate` 上不会让它成为 delegate，补了 `main.swift` | AppKit 给它的 `main()` 默认实现只有 `exit(NSApplicationMain(...))` 一行。Xcode 模板靠 `MainMenu.xib` 的 outlet 补这一步，Apple 自己的文档示例也默认了那个前提。没有 nib 的结果是 App 起来、run loop 转着、一个 delegate 方法都没调用，且哪里都不报错 |
+| 2026-10-27 | 平台的 payload 不再经 `FilesService` 拷进 `/Library`，直接从 App bundle 注入 | 落地步骤 3 让共享 daemon 不挂 `FilesService`，但协调器那段代码留着没改 —— 每次注入都会在 staging 这一步失败。daemon 以 root 读 bundle，沙盒目标走 `dlopen` 时读的是 `/Applications`，任何沙盒配置都允许 |
+| 2026-10-27 | 脚手架两种形态用「一棵模板 + 一层覆盖」，不是两棵完整模板 | 提案原写「两套模板都要维护」。真正不同的只有八个文件、相同的四十来个；复制四十个去让八个不同，代价是那四十个会慢慢漂移而两边各自都能构建。方向是减少重复，外部行为不变 |
+| 2026-10-27 | 落地步骤 10（端到端验证）**受阻，不勾完成** | 共享 daemon 要用户在「登录项」批准，这一步只能由人做。卡点从 `sudo` 换成了登录项批准，没有消失。边界之内能验的都验了，包括一个必然导致全部注入失败的缺陷 |
+| 2026-10-27 | 落地步骤 1–9、11–12 完成，10 受阻；待合并 | 全量测试：`swift-helper-service` 101 个、`ViewHierarchyCapture` 53 个、脚手架两种形态各构建通过 |

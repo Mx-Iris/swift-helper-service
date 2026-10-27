@@ -34,12 +34,14 @@
 | [BrokeredPeer.md](Architecture/BrokeredPeer.md) | `HelperPeer` 的独立握手协议。Client/Server 命名为何容易误导；初次握手与重连的完整时序；**两阶段 `init` + `activate()` 为何必须存在**（否则有静默丢消息的竞态）；状态流为何用 `AsyncStream` 而非 Combine；与 `HelperServer`/`HelperClient` 的对照表。 | 用 `HelperPeerClient` / `HelperPeerServer`，或排查握手竞态时。**改动握手顺序前必读。** |
 | [WireCompatibility.md](Architecture/WireCompatibility.md) | 「只增不改」的承诺：共享 daemon 服务多个独立发版的客户端之后，为什么线格式必须冻结；哪四样东西已经是线格式；允许与不允许的演进；版本协商为什么必须主动问（`errorIndicatesOutdatedPeer` 不可能返回 `true`）；改动前的检查清单。 | 动任何 `Request`、`identifier`、`errorDomain` 或 `rawValue` 之前。 |
 | [HookKit.md](Architecture/HookKit.md) | `HookKit` —— 替换宿主进程里的 Objective-C 方法。类型编码校验为什么是整条链路里最值钱的一步、编码必须从活宿主读；多候选拼写的来历（macOS 27 给 Dock 的图标 setter 加参数）与「按宿主实际会调的拼写排序」；全或无的取舍及其代价；「装上了 ≠ 跑起来了」。 | 写 payload 的 hook、或某个 hook 装上了却没生效时。 |
+| [Arm64eInjection.md](Architecture/Arm64eInjection.md) | 注入器与 payload 为什么都必须带 arm64e 切片（两者理由不同：一条 PAC 指令在 arm64 下是空操作 vs. 一次实测结论）；Dock tile 插件那个看似相反的旁证为什么推不翻它；daemon 的切片校验在挡什么；让 arm64e 成立的六处配置各自在挡什么；SwiftPM 产不出 arm64e 但 Xcode 项目可以。 | 注入 arm64e 目标失败时，或改动任何与架构有关的构建设置之前。 |
 
 ### Guides —— 使用指南
 
 | 文档 | 讲什么 | 什么时候读 |
 |---|---|---|
 | [InjectionPrerequisites.md](Guides/InjectionPrerequisites.md) | 注入的运行前提 —— 那些「代码没错但就是注不进去」的宿主机状态。**关 SIP 不等于关掉 library validation**（真正的开关是一份 plist 里的值）；走 remap 路径为何必须导出入口符号；seatbelt 与「注入成功但目标被内核杀掉」；以及怎么读 daemon 日志。 | 注入失败排查时；调用 `InjectApplicationRequest` 之前。 |
+| [SharedDaemonClients.md](Guides/SharedDaemonClients.md) | 怎么写一个共享注入 daemon 的客户端：用户只需装平台 App 并批准一次；客户端**不得**安装或升级 daemon 以及为什么；签名要求满足不了时才用开发模式，以及它为什么需要两个布尔值；注入请求为什么应该把路径选择留给 daemon；payload 放哪、daemon 注入前会拒绝什么（含 strip 之后必须重签）；回传通道的两条顺序规矩；哪些部分还没被验证。 | 把一个工具接到共享 daemon 上之前。 |
 
 ### Evolutions —— 提案
 
