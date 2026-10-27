@@ -441,7 +441,18 @@ SwiftyXPC 一旦开始回复，该测试就会失败，判别器随即恢复可�
    验」——两者在重启前不一致。以及**开发模式比设想的窄**：本项目设了 `DEVELOPMENT_TEAM`，Xcode 连
    Debug 构建都用 Apple Development 证书签名、leaf 的 OU 即 Team ID，本来就满足要求；它只对完全没有
    可用签名的二进制（ad-hoc、无证书的机器、团队外客户端）才有意义。
-5. **注入前校验。** 架构切片、platform、签名三项，失败经提案 0002 的错误通道带描述返回。
+5. **[已完成]** **注入前校验。** platform 一项之前已有；本批补上**架构切片**与**签名**，失败经
+   提案 0002 的错误通道带描述返回。新增 `MachOArchitecture`（沿用既有解析器的边界检查风格）与
+   6 个测试，全量 59 个通过。
+
+   落地时定下的三条边界：**读不出来一律放行**（与既有的 platform 守卫一致——看不清就拦会把每个
+   无法解析的文件变成一次失败的注入）；**未签名的 payload 放行**（ad-hoc 在开发期很正常，「谁能注入
+   什么」是 listener 要求该管的事，不是这里），只拒绝「声称有签名但校验不过」的那种——那正是会杀死
+   目标的那种；**Rosetta 目标跳过架构检查**，因为「内核把 arm64e 排在 arm64 前面」这条推断对它不成立。
+
+   另外把「选哪个切片」的推断从文件读取里拆出来（`preferredExecutingArchitecture(from:)`），否则它
+   只能靠机器上恰好存在的二进制来测——实测 `/bin/ls` 是 `x86_64 arm64e`，没有纯 arm64 切片，而
+   `/usr/lib/libobjc.A.dylib` 在磁盘上根本不存在（已并入 dyld shared cache），这两条都写进了测试。
 6. **标准回传通道。** payload 侧 Swift 库：XPC 优先、seatbelt 挡住则绑 0 取端口退回本地 socket、
    经端点注册表上报。`InjectedEndpointInfo` 追加 `localSocketPort`。
 7. **抽出 `HookKit`。** 从 `InjectionScaffold` 模板搬进平台客户端库，保留它现有的签名校验、多候选

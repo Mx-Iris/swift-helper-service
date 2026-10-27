@@ -1,5 +1,6 @@
 #if os(macOS) || targetEnvironment(macCatalyst)
 import Foundation
+import Security
 import HelperService
 import MachInjector
 import InjectionServiceInterface
@@ -22,6 +23,10 @@ public actor InjectionService: HelperService {
         static let payloadPlatformMismatch = -4
         /// A cross-platform target refused a dlopen, and remap is not an option for it.
         static let crossPlatformTargetRefusedDlopen = -5
+        /// The payload has no slice for the architecture the target executes.
+        static let payloadArchitectureMismatch = -6
+        /// The payload's code signature does not validate.
+        static let payloadSignatureInvalid = -7
     }
 
     /// This daemon's own platform, read once.
@@ -83,6 +88,8 @@ public actor InjectionService: HelperService {
             payloadPath: payloadPath,
             targetPlatform: targetPlatform
         )
+        try requirePayloadCoversTargetArchitecture(pid: request.pid, payloadPath: payloadPath)
+        try requirePayloadSignatureIsValid(payloadPath: payloadPath)
 
         let strategy = request.preferredStrategy
             ?? InjectionStrategy.initialAttempt(forTarget: request.pid, payloadPath: payloadPath)
@@ -175,6 +182,89 @@ public actor InjectionService: HelperService {
             which is why the payload ships as a separate bundle per platform.
             """
         )
+    }
+
+    /// Refuses a payload with no slice for the architecture the target is executing.
+    ///
+    /// This is the most common packaging mistake and the least legible one. An arm64e process
+    /// does not accept an arm64-only library: the `dlopen` comes back with a message about the
+    /// file not being loadable, which reads like a missing file or a bad path, and on the remap
+    /// path the payload goes in and the target dies instead. Both are hours of looking in the
+    /// wrong place. One sentence naming the missing slice ends it.
+    ///
+    /// Anything unreadable — on either side — passes. Same reasoning as the platform guard: a
+    /// check that blocks whenever it cannot see clearly turns every unparseable target into a
+    /// failed injection, and this is a second line of defence rather than the decision itself.
+    /// Translated (Rosetta) targets also pass, because the inference behind
+    /// ``MachOArchitectureReader/executingArchitectureOfProcess(_:)`` does not hold for them —
+    /// neither injector supports such a target anyway, and it fails later with its own message.
+    @MainActor
+    private static func requirePayloadCoversTargetArchitecture(pid: pid_t, payloadPath: String) throws {
+        guard let targetArchitecture = MachOArchitectureReader.executingArchitectureOfProcess(pid),
+              let payloadArchitectures = MachOArchitectureReader.architecturesOfFile(atPath: payloadPath),
+              !payloadArchitectures.contains(targetArchitecture)
+        else { return }
+
+        let present = payloadArchitectures
+            .map(\.description)
+            .sorted()
+            .joined(separator: ", ")
+
+        throw makeError(
+            code: ErrorCode.payloadArchitectureMismatch,
+            description: """
+            Process \(pid) executes \(targetArchitecture), but the payload at \(payloadPath) only \
+            has \(present). An arm64e process will not load an arm64-only library — dyld grades \
+            arm64e strictly, so there is no fallback to the arm64 slice. Rebuild the payload for \
+            \(targetArchitecture); for a fat build that is `-arch arm64 -arch arm64e`, and for an \
+            Xcode target it is ENABLE_POINTER_AUTHENTICATION plus a generic/platform=macOS \
+            destination (a `platform=macOS` destination silently drops the slice).
+            """
+        )
+    }
+
+    /// Refuses a payload whose signature does not validate.
+    ///
+    /// Worth checking before injecting rather than after, because of how it fails otherwise: the
+    /// kernel SIGKILLs the *target* when a mapped page's hash does not match the signature, and
+    /// it does so during page-in, before `dlopen` returns anything the injector could relay. From
+    /// the outside that is "injection reported success and the app disappeared" — the payload is
+    /// the last place anyone looks.
+    ///
+    /// An unsigned payload is allowed through. Ad hoc and unsigned binaries are ordinary during
+    /// development, and refusing them would make this check a policy decision about who may
+    /// inject what — which is the listener's requirement's job, not this one's. What is refused
+    /// is a payload that *claims* a signature which does not hold: that one is either corrupt or
+    /// tampered with, and it is the one that kills the target.
+    @MainActor
+    private static func requirePayloadSignatureIsValid(payloadPath: String) throws {
+        var staticCode: SecStaticCode?
+        let creationStatus = SecStaticCodeCreateWithPath(
+            URL(fileURLWithPath: payloadPath) as CFURL,
+            [],
+            &staticCode
+        )
+        guard creationStatus == errSecSuccess, let staticCode else { return }
+
+        let validityStatus = SecStaticCodeCheckValidity(staticCode, [], nil)
+        switch validityStatus {
+        case errSecSuccess, errSecCSUnsigned:
+            // Unsigned is fine; see the note above.
+            return
+        default:
+            let explanation = SecCopyErrorMessageString(validityStatus, nil) as String?
+                ?? "OSStatus \(validityStatus)"
+            throw makeError(
+                code: ErrorCode.payloadSignatureInvalid,
+                description: """
+                The payload at \(payloadPath) carries a code signature that does not validate: \
+                \(explanation). It was not injected, because this is the failure that kills the \
+                target rather than reporting an error — the kernel terminates a process when a \
+                mapped page's hash does not match, during page-in, before dlopen returns. \
+                Re-sign the payload (`codesign -f -s -` for an ad hoc signature) and try again.
+                """
+            )
+        }
     }
 
     /// Whether this injection may fall back to remap, and why not when it may not.

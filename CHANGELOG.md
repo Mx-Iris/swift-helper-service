@@ -42,6 +42,28 @@ This file starts at 0.2.0. Earlier releases are not covered.
   **The version string a daemon reports must now be `major.minor.patch`.** That format is part of
   the wire contract; see `Documentations/Architecture/WireCompatibility.md`.
 
+### Changed
+
+- **`InjectionService` checks the payload's architecture and signature before injecting.** Both
+  failures were previously invisible in a way that sent people looking somewhere else entirely:
+
+  - An arm64e process will not load an arm64-only library. The `dlopen` came back saying the file
+    could not be loaded, which reads like a wrong path, and on the remap path the payload went in
+    and the target died instead. The refusal now names the architecture the target executes, what
+    the payload actually has, and what to rebuild.
+  - A payload whose signature does not validate gets its *target* SIGKILLed by the kernel during
+    page-in, before `dlopen` returns anything to relay — from outside, "injection succeeded and
+    the app vanished". It is now refused up front.
+
+  **An unsigned payload is still allowed.** Ad hoc and unsigned binaries are ordinary while
+  developing, and refusing them would make this a policy decision about who may inject what,
+  which belongs to the listener's requirement. Only a payload claiming a signature that does not
+  hold is refused.
+
+  Anything unreadable passes, as with the existing platform guard: a check that blocks whenever
+  it cannot see clearly turns every unparseable file into a failed injection. Translated (Rosetta)
+  targets also skip the architecture check, since the inference behind it does not hold for them.
+
 ### Fixed
 
 - **The endpoint registry no longer grows forever.** A sub-server or peer that exited used to leave
