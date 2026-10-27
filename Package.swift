@@ -186,6 +186,9 @@ let package = Package(
             dependencies: [
                 "HelperCommunication",
                 "HelperService",
+                // For the mach-lookup probe that decides whether a payload can reach the tool
+                // over XPC at all, or has to fall back to a loopback socket.
+                "HelperProcessProbe",
                 .product(name: "SwiftyXPC", package: "SwiftyXPC"),
                 .product(name: "FoundationToolbox", package: "FrameworkToolbox"),
             ],
@@ -283,6 +286,10 @@ let package = Package(
                 "InjectionServiceInterface",
                 "InjectionServiceImplementation",
             ],
+        ),
+        .testTarget(
+            name: "HelperPeerTests",
+            dependencies: ["HelperPeer"],
         ),
         .testTarget(
             name: "MainServiceTests",

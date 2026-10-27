@@ -40,6 +40,22 @@ int HelperProcessProbeSandboxCheckPath(pid_t pid, const char *operation, const c
 /// unknown or exited pid, most commonly).
 int HelperProcessProbeCodeSigningStatus(pid_t pid, uint32_t *outStatus);
 
+/// Asks `pid`'s sandbox whether it would permit looking up the Mach service
+/// `globalName` — the question that decides whether an injected payload can
+/// reach the daemon over XPC at all.
+///
+/// Two unrelated sandbox flavours answer "no", which is why this probes rather
+/// than sniffing entitlements: App Sandbox apps run a `(deny default)` profile
+/// whose `mach-lookup` allowlist will not contain a third-party service, and
+/// seatbelt-profiled system daemons are equally closed while carrying no
+/// `com.apple.security.app-sandbox` entitlement to notice.
+///
+/// Same return convention as the path check: `0` permitted (including for an
+/// unsandboxed process), positive denied, `-1` on error. Callable for any pid,
+/// including `getpid()`, so a host and the payload inside its target reach the
+/// same conclusion about that target.
+int HelperProcessProbeSandboxCheckMachLookup(pid_t pid, const char *globalName);
+
 /// `CS_REQUIRE_LV` — set when the process enforces AMFI library validation.
 extern const uint32_t HelperProcessProbeCodeSigningRequiresLibraryValidation;
 

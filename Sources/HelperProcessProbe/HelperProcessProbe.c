@@ -13,6 +13,7 @@ extern int csops(pid_t pid, uint32_t ops, void *useraddr, size_t usersize);
 
 // Values from the private sandbox headers.
 #define HelperProcessProbeSandboxFilterPath 1u
+#define HelperProcessProbeSandboxFilterGlobalName 2u
 #define HelperProcessProbeSandboxCheckNoReport 0x40000000u
 
 // Values from the private code-signing headers.
@@ -37,4 +38,11 @@ int HelperProcessProbeCodeSigningStatus(pid_t pid, uint32_t *outStatus) {
         *outStatus = status;
     }
     return 0;
+}
+
+int HelperProcessProbeSandboxCheckMachLookup(pid_t pid, const char *globalName) {
+    return sandbox_check(pid,
+                         "mach-lookup",
+                         HelperProcessProbeSandboxFilterGlobalName | HelperProcessProbeSandboxCheckNoReport,
+                         globalName);
 }
