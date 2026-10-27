@@ -50,6 +50,11 @@
   —— 服务端抛的错到达调用方时只剩 domain + code，描述全丢；daemon 侧又无日志，失败两端不留痕。
   在通道层统一包装成一个 `Codable` 的传输错误类型并记日志，所有现有服务一行不改即受益。落地时还
   带来了本仓库**第一个真实 XPC 往返测试**，并借此发现 `errorIndicatesOutdatedPeer` 一直是失效的。
+- [draft - 一个共享的注入 daemon](Evolutions/draft-shared-injection-daemon.md) —— 把「每个注入工具
+  各带一个特权 daemon」改成「全机一个共享 daemon」：用户只在登录项批准一次，此后所有工具作为客户端
+  连它。daemon 里只放注入与端点注册表；本库补上标准回传通道、注入前的 payload 校验与 `HookKit`。
+  含 arm64e 切片的五处配置加一个 destination、与 `InjectionScaffold` 的分工，以及冻结接口前的清理
+  批次。状态 **Accepted**，实现在 `feature/shared-injection-daemon`。
 
 ### 其他
 
