@@ -420,8 +420,16 @@ SwiftyXPC 一旦开始回复，该测试就会失败，判别器随即恢复可�
    `HelperClient.requireToolVersion(atLeast:)`，线格式不变（`FetchVersionRequest` 仍回 `String`，
    这个类型是对它的约定解释）。文档写明**判断 daemon 是否过旧一律用主动查询，不得依赖
    `errorIndicatesOutdatedPeer(_:)`**。术语表新增 `wire format`。全量 50 个测试通过。
-3. **新建 `InjectionPlatform` 仓库。** App 外壳 + daemon，走通 `SMAppService` 注册。**本步的验收标准
-   是构建产物校验通过** —— daemon 与 payload 都带 arm64e 切片，照搬脚手架的六处配置与构建后校验。
+3. **[已完成]** **新建 `InjectionPlatform` 仓库。** 位于 `Personal/App/InjectionPlatform`，
+   GitHub 私有仓库 `Mx-Iris/InjectionPlatform`。由 `InjectionScaffold` 生成后做四处实质改造：
+   daemon 去掉 `FilesService`、去掉客户端侧的注入路径开关、payload target 重定位为参考载荷、
+   依赖指向本功能分支的 worktree（并修掉脚手架停留在 0.1.4 所欠的那处已删 API）。
+
+   **验收：构建产物校验通过。** daemon 与 payload 均为 `x86_64 arm64 arm64e`，App 为
+   `x86_64 arm64`（它不需要 arm64e），macro plugin 为单一的 `arm64` —— 最后一项是
+   `ENABLE_POINTER_AUTHENTICATION` 有没有被误提到项目级的判据。launchd plist 的 `Label` /
+   `BundleProgram` / `MachServices` 三处一致，Debug 带 `.debug` 后缀。
+   `SMAppService` 的实际注册需要用户在「登录项」批准，留到有界面之后一并验。
 4. **接入信任模型。** 签名白名单、开发模式开关（daemon 侧持久化，仅平台 App 可改）、Debug/Release
    分服务名。
 5. **注入前校验。** 架构切片、platform、签名三项，失败经提案 0002 的错误通道带描述返回。
@@ -470,3 +478,8 @@ SwiftyXPC 一旦开始回复，该测试就会失败，判别器随即恢复可�
 | 2026-10-27 | `RegisterEndpointRequest` 的新字段设为 `Optional` | 它是线格式。设成必填会让不带该字段的老 peer 整个注册失败；设成可选则退化回原来的只增不减行为，只影响那一个条目 |
 | 2026-10-27 | 重复注册同一 identifier 时，先把它从旧 pid 的监视下摘掉 | sub-server 崩溃重启会用新 pid 重新注册同一 identifier。不摘，旧进程的退出事件稍后就会把刚接替它的那个活条目清掉。已由 `reRegisteringRebindsTheEntryToTheNewProcess` 钉住 |
 | 2026-10-27 | 进程监视改用私有串行队列，不用 `.main` | 事件处理只是跳进 actor，不需要主队列；而依赖主队列会让清理在任何不转主队列的环境里不可观察——包括测试进程 |
+| 2026-10-27 | 平台 App 用 `InjectionScaffold` 生成，而不是手写 | 那套 Xcode 工程把 arm64e 的五处配置、launchd plist 的构建期生成、embed 规则都固化了，手搓 pbxproj 搞错的表现是「构建成功、注入时失败」。用户在两种路径间选了这一条 |
+| 2026-10-27 | 生成出来的 payload target 保留，重新定位为平台自带的**参考载荷**，而不是删除 | 本会话没有 Xcode MCP 与 xcodeproj MCP，从 pbxproj 删一个 target 要同步改八九个 section，漏一处就打不开工程。而保留它还有正面价值：脚手架的 bring-up 顺序里本就有「先证明 payload 能挂上、此时不声明任何 hook」这一环，平台需要它把「平台自身有没有问题」与「客户端有没有问题」分开，端到端验证那一步也用得上 |
+| 2026-10-27 | 平台 daemon 不挂 `FilesService` | 脚手架挂它是为了把 payload 放进 `/Library`（那确实要 root）。但本提案已决定平台不托管 payload 存储，客户端自备路径、daemon 只校验，于是它没有存在理由。去掉后 daemon 里剩下的每一样都离不开 root |
+| 2026-10-27 | 去掉客户端侧的注入路径开关，`preferredStrategy` 传 `nil` | 生成出来的代码有个 `InjectionMethod` 开关，两条路各发一条消息——那正是[提案 0001](0001-injection-strategy-attempt-not-predict.md) 要消除的「客户端侧的第二份规则」。daemon 持有 task port、能探测目标，让它决定；入口符号则总是带上，因为只有 daemon 知道会不会用到 remap |
+| 2026-10-27 | 平台 App 暂时以本地 path 依赖指向本功能分支的 worktree，并用 `.package(name:path:)` 显式指定 identity | 它需要本分支新增的注册表清理与 `requireToolVersion`，而这些尚未发版。`name:` 不是装饰：SwiftPM 按目录 basename 推断 path 依赖的 identity，而 worktree 目录名按约定带后缀，不指定就全部解析失败。**本分支合并发版后必须换成版本依赖** |
