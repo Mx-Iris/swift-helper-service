@@ -481,8 +481,12 @@ SwiftyXPC 一旦开始回复，该测试就会失败，判别器随即恢复可�
    - **[已完成]** 选路与端口推导：C 侧的 `mach-lookup` 探测、`PeerTransport` / `PeerTransportSelection`
      / `PeerPortDerivation`，以及 9 个测试（全量 66 个通过）。原定的「绑 0 + 经注册表上报」在此被
      推翻，改为角色反转 + 确定性推导，理由见上文「标准通道的选路」。`InjectedEndpointInfo` 不动。
-   - **[待做]** socket 传输层本身：宿主侧 listener、payload 侧 connect、消息分帧，以及把两条传输
-     收到同一套 `Request` / `Response` 之下。
+   - **[已完成]** socket 传输层：`PeerSocketFraming`（长度前缀分帧）与 `PeerSocketChannel`
+     （建在 Network.framework 上，带 correlation 配对、超时、取消唤醒等待者）。19 个新测试，
+     其中 8 个是**两个真实 loopback 端点对连**的集成测试，全量 85 个通过。
+   - **[待做]** 把 socket 这条路接进 `HelperPeerClient` / `HelperPeerServer` 的生命周期 ——
+     目前 `PeerSocketChannel` 是能独立使用的类型，但还没有统一在 `PeerConnection` 协议之下
+     （那个协议为 XPC 而设，`listenerEndpoint` 对 socket 没有意义，硬套会得到一堆抛错的占位方法）。
 7. **抽出 `HookKit`。** 从 `InjectionScaffold` 模板搬进平台客户端库，保留它现有的签名校验、多候选
    拼写与原子安装语义。
 8. **菜单栏管理界面。** daemon 状态、已注入进程列表（只读 + 退出目标 App）、开发模式警告、升级入口

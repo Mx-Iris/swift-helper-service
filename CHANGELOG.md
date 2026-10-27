@@ -42,6 +42,34 @@ This file starts at 0.2.0. Earlier releases are not covered.
   **The version string a daemon reports must now be `major.minor.patch`.** That format is part of
   the wire contract; see `Documentations/Architecture/WireCompatibility.md`.
 
+### Added
+
+- **A loopback socket transport for peers that cannot use XPC** (`PeerSocketChannel`,
+  `PeerTransportSelection`, `PeerPortDerivation`).
+
+  The brokered XPC handshake needs both sides to look up the tool's Mach service, and a
+  sandboxed target cannot: App Sandbox runs a `(deny default)` profile whose `mach-lookup`
+  allowlist will not contain a third-party service, and seatbelt-profiled system daemons are
+  closed the same way without carrying an entitlement that would reveal it.
+
+  On the socket path **the roles invert — the host listens and the payload connects out.** A
+  sandboxed process can dial localhost, but nothing can discover a port it bound: the tool is
+  the blocked hop and a sandboxed app shares no directory with its host. Both sides therefore
+  derive the same port from one identifier instead of announcing it.
+
+  `PeerPortDerivation` uses djb2, **not `Hasher`** — `Hasher` is seeded per process, so the two
+  sides would derive different ports and wait on each other, a failure that only appears across
+  a process boundary.
+
+  Selection is a probe (`sandbox_check`), not entitlement sniffing, because the two sandbox
+  flavours that block this do not look alike. Callers use
+  `PeerTransportSelection.transport(forProcess:machServiceName:channelIdentifier:)`; the host
+  asks about its target before injecting, the payload asks about `getpid()` afterwards, and they
+  reach the same answer without negotiating.
+
+  Not covered: a real sandboxed target. Nothing here performs an injection, so that conclusion
+  rests on `sandbox_check`'s semantics and on RuntimeViewer's production experience.
+
 ### Changed
 
 - **`InjectionService` checks the payload's architecture and signature before injecting.** Both

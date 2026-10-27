@@ -208,13 +208,74 @@ public nonisolated var stateStream: AsyncStream<PeerConnectionState> { get }
 `HelperService` 的服务挂载协议。也就是说注册表被复用于两种完全不同的用途 —— 这是它被设计成
 「只存 `(HelperServerInfo) → XPCEndpoint` 映射、不理解语义」的回报。
 
-## 七、已知粗糙处
+## 七、沙盒目标：这套握手根本用不了
 
-- **注册表条目不会被清理**。peer 进程退出后端点仍留在 `MainService` 里（见
-  [Overview.md 第八节](Overview.md#八已知粗糙处)）。业务上需要清理的场景目前靠
-  `InjectedEndpointRegistryService` 自己用 `DispatchSourceProcess` 监听进程退出解决，`HelperPeer`
-  这条线没有对应机制。
-- **`HelperPeer` 没有测试**。仓库根目录 `AGENTS.md` 一度描述存在 `HelperPeerTests`，以及
-  `HelperPeerClient`/`HelperPeerServer` 上有 `@_spi(Testing)` 的测试用 init 接受 `toolEndpoint:`
-  —— **这两样在源码里都不存在**，已在补写本文时更正。上面所有握手时序都是**读代码得出的，未经
-  自动化测试覆盖**。
+上面整套机制有一个前提：**两端都能 lookup tool 的 mach service**。目标被沙盒时这个前提不成立，
+而且不是「慢一点」或「要重试」，是彻底不通：
+
+- **App Sandbox 的 App**（`com.apple.security.app-sandbox`）跑在 `(deny default)` 的 profile 下，
+  它的 `mach-lookup` 白名单里永远不会有第三方服务。
+- **带 seatbelt profile 的系统守护进程**同样是 `(deny default)`，却**不带** app-sandbox
+  entitlement —— 所以靠嗅 entitlement 判断会漏掉它们，必须实测。
+
+于是 payload 连 tool 都连不上，注册端点、取对方端点这两步全都做不了。
+
+### 退路：loopback socket，而且角色是反的
+
+| | XPC 路径 | socket 路径 |
+|---|---|---|
+| 谁先到、谁等 | 宿主留下端点等人 | 宿主**监听** |
+| 谁主动 | payload 取端点后连过去 | payload **连出去** |
+| 怎么找到对方 | 经 tool 的注册表交换端点 | 两边**各自推导**出同一个端口 |
+
+**角色必须反过来**：沙盒进程可以向 localhost 外连，但没有任何人能发现它 bind 了哪个端口 ——
+tool 这条路正是被挡的那条，文件也不行（沙盒 App 和宿主没有共享目录，RuntimeViewer 正因此放弃了
+文件式端口发现）。让宿主监听，就把「通报一个端口」变成了「约定一个端口」。
+
+### 端口怎么约定
+
+`PeerPortDerivation.port(for:)`，djb2 哈希到 49152–65535。三条约束：
+
+- **不能用 `Hasher`**。它每进程种子不同，两边会算出不同端口然后互相干等，而这个错误只在跨进程时
+  才显形。测试里独立重算了一遍期望值来钉死算法。
+- **identifier 必须含目标 pid**（用 `channelIdentifier(serviceName:targetProcessIdentifier:)`
+  生成），否则同时注入两个进程会撞到同一端口，第二个 listener 直接 bind 失败。
+- **撞上无关软件是可能的**，这个范围和全机的临时端口共享。监听方会报 bind 失败，**不会**自动换一个
+  端口重试 —— 对面没有办法跟着换。
+
+### 选路
+
+`PeerTransportSelection.transport(forProcess:machServiceName:channelIdentifier:)`。宿主在注入**前**
+问目标 pid，payload 进去之后问 `getpid()` —— 同一个问题，同一个答案，不需要协商（而且需要协商的
+那个场景恰恰没有通道可协商）。
+
+一个反直觉的细节：`sandbox_check` 对**内核找不到的 pid 回答「拒绝」而不是报错**。照字面处理会把
+已退出的目标推上 socket 路径去无限等待，所以探测前先确认进程存在 —— 按 `ESRCH` 判断，因为属于其他
+用户的活进程回的是 `EPERM`，那不是跳过探测的理由。
+
+### 传输本身
+
+`PeerSocketChannel`，建在 Network.framework 上。XPC 自带的东西这里都要自己做：
+
+- **分帧**：`UInt32` 大端长度前缀。大端不是品味问题 —— 字节序弄反时，读端会看到一个貌似合理的巨大
+  长度然后永远等下去，所以超过 16 MiB 直接报错而不是等。
+- **请求/响应配对**：每条请求一个 correlation 号。一条流上同时有多个请求在飞，少了它第二个调用方
+  会拿到第一个的答复，而这种错只在并发下出现。
+- **超时**：socket 不会告诉你对面已经不管了（XPC 的连接中断会自己冒出来）。默认 30 秒。
+- **取消时必须唤醒所有等待者**：没被 resume 的 `CheckedContinuation` 不只是丢一个回复，而是让那个
+  task 永远不返回。
+
+**没有认证也没有加密**，它只绑 `127.0.0.1`。暴露面是本机其他进程，而那些进程本来就能和 daemon 说话。
+
+沙盒目标若缺 `com.apple.security.network.client`，连 localhost 也会被沙盒拒绝 —— 实测 Books、Maps、
+Calculator 都带这个 entitlement，但这不是保证，所以连接失败的错误信息里点名了这一条。
+
+## 八、已知粗糙处
+
+- **注册表条目不会被清理** —— 这条已在共享 daemon 提案的清理批次中修掉：`MainService` 现在按注册方
+  pid 挂 `DispatchSourceProcess`，进程退出即移除。
+- **XPC 握手仍然没有自动化测试**。上面第三、四节的握手时序是**读代码得出的**。socket 这条路有测试
+  （`PeerSocketChannelTests` 用两个真实的 loopback 端点对连，覆盖往返、并发配对、错误传播、取消与
+  超时），**XPC 那条没有** —— 不要把这里的绿色当成整个 `HelperPeer` 都被覆盖了。
+- **沙盒目标里的 socket 路径从未真跑过**。本仓库不做真实注入，所以上面关于沙盒的结论来自
+  `sandbox_check` 的语义和 RuntimeViewer 的生产经验，不是本仓库测出来的。
