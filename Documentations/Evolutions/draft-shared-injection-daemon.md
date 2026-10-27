@@ -509,8 +509,30 @@ SwiftyXPC 一旦开始回复，该测试就会失败，判别器随即恢复可�
    一处落地时的改写：`HookActivityReporter` 原来用 `Synchronization.Atomic`，那是 macOS 15，而本包
    下限是 10.15，改为 `os_unfair_lock`。快路径从「一次 relaxed load」变成「一次无竞争加锁」，渲染
    路径上够用，这一点在代码注释与文档里都写明了，没有含糊成「等价替换」。
-8. **菜单栏管理界面。** daemon 状态、已注入进程列表（只读 + 退出目标 App）、开发模式警告、升级入口
-   （含「会打断当前注入会话」的告知）。
+8. **[已完成]** **菜单栏管理界面。** daemon 状态、已注入进程列表（只读 + 退出目标 App）、开发模式
+   警告、升级入口（含「会打断当前注入会话」的告知）。App 生命周期回到 AppKit，界面是 SwiftUI +
+   MacControlCenterUI；部署目标 15.0 → 26.0（`NSHostingSceneRepresentation` 的要求）。新增
+   `InjectionPlatformUI` target 与 `DeveloperModeController`；`PrivilegedDaemonController` 拆出
+   只查不装的 `refreshResidentVersion()`，因为界面要先**提供**升级再执行升级，而重装会掐掉每个
+   payload 的通道。
+
+   **两处实测推翻了原计划，都写进了平台的 `CLAUDE.md`：**
+
+   - **`@main` 贴在 `NSApplicationDelegate` 上不会让它成为 delegate。** AppKit 给它的 `main()`
+     默认实现只有 `exit(NSApplicationMain(...))` 一行，既不构造那个类型也不赋值 `NSApp.delegate`；
+     Xcode 的 AppKit 模板靠 `MainMenu.xib` 的 File's Owner 连 outlet 补上这一步，Apple 自己的
+     `NSHostingSceneRepresentation` 文档示例也默认了那个前提。本项目没有 nib，结果是 App 起来、
+     run loop 转着、**一个 delegate 方法都没调用**，而且哪里都不报错。补了一个 `main.swift`。
+   - **`MenuBarExtra` 装不进 `NSHostingSceneRepresentation`。** 实测：托管场景里声明一个，状态栏项
+     从未被创建。与该类的文档一致 —— 它持有的场景是被**呈现**的，而 `MenuBarExtra` 不由任何人呈现。
+     状态栏项改回 AppKit 的 `NSStatusItem`，内容仍是 SwiftUI（`NSHostingView` 里的
+     `MacControlCenterMenu`，装在无边框 non-activating `NSPanel` 里）。设置窗口仍然是经
+     `NSHostingSceneRepresentation` 托管的 SwiftUI `Window`，与原要求一致。
+
+   **验证到哪一步：** App 构建通过，启动后 `NSStatusItem` 报告 `isVisible == true`、button 与
+   status bar window 均在，日志里有对应的一行。**菜单栏上肉眼可见、以及点开之后菜单长什么样，没有
+   验证** —— 本机未授予终端屏幕录制权限，`screencapture` 取不到画面，而状态栏项不出现在
+   `CGWindowListCopyWindowInfo` 里（系统合成，不是每个 App 自己的窗口），所以探针问不出这件事。
 9. **迁移 `ViewHierarchyCapture`。** 改为 Xcode workspace 结构（现有 SwiftPM 包保留，新增 payload 的
    Xcode project）；payload **只换通信层** —— 已验证的 Objective-C 逻辑（Xcode 组件加载、phase 序列、
    gzip 解压）原样保留，外面加一层 Swift 接 `HelperPeer`，删掉交换目录与轮询；删掉 `sudo` 路径。
