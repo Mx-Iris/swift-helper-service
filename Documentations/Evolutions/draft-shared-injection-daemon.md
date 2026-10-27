@@ -523,16 +523,36 @@ SwiftyXPC 一旦开始回复，该测试就会失败，判别器随即恢复可�
      Xcode 的 AppKit 模板靠 `MainMenu.xib` 的 File's Owner 连 outlet 补上这一步，Apple 自己的
      `NSHostingSceneRepresentation` 文档示例也默认了那个前提。本项目没有 nib，结果是 App 起来、
      run loop 转着、**一个 delegate 方法都没调用**，而且哪里都不报错。补了一个 `main.swift`。
-   - **`MenuBarExtra` 装不进 `NSHostingSceneRepresentation`。** 实测：托管场景里声明一个，状态栏项
-     从未被创建。与该类的文档一致 —— 它持有的场景是被**呈现**的，而 `MenuBarExtra` 不由任何人呈现。
-     状态栏项改回 AppKit 的 `NSStatusItem`，内容仍是 SwiftUI（`NSHostingView` 里的
-     `MacControlCenterMenu`，装在无边框 non-activating `NSPanel` 里）。设置窗口仍然是经
-     `NSHostingSceneRepresentation` 托管的 SwiftUI `Window`，与原要求一致。
+   - ~~**`MenuBarExtra` 装不进 `NSHostingSceneRepresentation`。**~~ → **这条判错了，已纠正。**
+     见下。
 
-   **验证到哪一步：** App 构建通过，启动后 `NSStatusItem` 报告 `isVisible == true`、button 与
-   status bar window 均在，日志里有对应的一行。**菜单栏上肉眼可见、以及点开之后菜单长什么样，没有
-   验证** —— 本机未授予终端屏幕录制权限，`screencapture` 取不到画面，而状态栏项不出现在
-   `CGWindowListCopyWindowInfo` 里（系统合成，不是每个 App 自己的窗口），所以探针问不出这件事。
+   **一次判错，以及它为什么看起来合理。** 症状是菜单栏空的，当时的结论是 `MenuBarExtra` 不能托管，
+   理由也站得住：那个类的文档把它持有的场景描述成**被呈现**的（环境动作或外部 URL 触发），而
+   `MenuBarExtra` 不由任何人呈现。于是状态栏项被改成手写的 `NSStatusItem` + `NSPanel`。
+
+   **真正的原因就是上面那条 `@main` 的坑** —— `applicationWillFinishLaunching` 压根没跑，
+   `addSceneRepresentation` 从未被调用。两个问题是先后发现的，修掉第二个之后没有回头重试第一个。
+
+   补做的对照实验，四种写法各看进程内 `NSApp.windows` 里有没有 `NSStatusBarWindow`：直接写在表示的
+   scene builder 里、包一层自定义 `Scene`、自定义 `Scene` 里 `MenuBarExtra` + `Window`、以及
+   delegate 直接建 `NSStatusItem` 的对照组 —— **四种都在 t+1s 就有**。已改回 `MenuBarExtra`，
+   `MenuBarController` / `NSPanel` 那套删掉。
+
+   **方法上的教训比结论重要**：状态栏项**不出现在 `CGWindowListCopyWindowInfo` 里**（系统合成，不是
+   每个 App 自己的窗口），当时用的正是这个外部探针，于是「探针看不到」被读成了「东西不存在」。唯一
+   可靠的判据是进程内的 `NSApp.windows` —— AppKit 给每个状态栏项建一个 `NSStatusBarWindow`。
+
+   **同一批实验里出来的第二条，这一条是真的**：设置窗口必须是 `Settings` 场景，不能是
+   `Window(id:)`。`Settings { … }` + `environment.openSettings()` 开得出来；
+   `Window(id:)` + `environment.openWindow(id:)` **什么都不发生** —— 没有窗口对象、没有报错。
+   bundle 里外、`NSApplicationMain` / `NSApplication.run()`、`.accessory` / 先切 `.regular`，
+   四种条件都试过，全都一样。改用 `Settings` 之后顺带拿到 ⌘, 和 App 菜单项，而且它本来就是设置窗口。
+
+   **验证到哪一步：** App 构建通过；真实 App 启动后日志里有
+   `Menu bar status item installed, button: true, visible: true` —— 那是
+   `menuBarExtraAccess` 的 introspection 回调，说明托管场景里的 `MenuBarExtra` 确实建出了状态栏项。
+   **菜单栏上肉眼可见、以及点开之后菜单长什么样，仍然没有验证** —— 本机未授予终端屏幕录制权限，
+   `screencapture` 取不到画面。
 9. **[已完成]** **迁移 `ViewHierarchyCapture`。** 分支 `feature/shared-injection-platform-client`。
    新增 `ViewHierarchyCapture.xcworkspace` 与 `ViewHierarchyCapturePayload.xcodeproj`（只有一个
    framework target），SwiftPM 包保留并接管全部源码；payload **只换通信层** —— 已验证的 Objective-C
@@ -650,3 +670,5 @@ SwiftyXPC 一旦开始回复，该测试就会失败，判别器随即恢复可�
 | 2026-10-27 | 脚手架两种形态用「一棵模板 + 一层覆盖」，不是两棵完整模板 | 提案原写「两套模板都要维护」。真正不同的只有八个文件、相同的四十来个；复制四十个去让八个不同，代价是那四十个会慢慢漂移而两边各自都能构建。方向是减少重复，外部行为不变 |
 | 2026-10-27 | 落地步骤 10（端到端验证）**受阻，不勾完成** | 共享 daemon 要用户在「登录项」批准，这一步只能由人做。卡点从 `sudo` 换成了登录项批准，没有消失。边界之内能验的都验了，包括一个必然导致全部注入失败的缺陷 |
 | 2026-10-27 | 落地步骤 1–9、11–12 完成，10 受阻；待合并 | 全量测试：`swift-helper-service` 101 个、`ViewHierarchyCapture` 53 个、脚手架两种形态各构建通过 |
+| 2026-10-27 | ~~`MenuBarExtra` 装不进 `NSHostingSceneRepresentation`，状态栏项改回 AppKit~~ → **判错，已改回 `MenuBarExtra`** | 真正的原因是 `@main` 那条坑让 `addSceneRepresentation` 从未被调用；两个问题先后发现，修掉第二个之后没回头重试第一个。补做的四种写法对照实验全部在 t+1s 建出 `NSStatusBarWindow`。方法上的错是用 `CGWindowListCopyWindowInfo` 去否定，而状态栏项根本不出现在那里面 |
+| 2026-10-27 | 设置窗口改用 `Settings` 场景，不用 `Window(id:)` | 实测：托管场景里 `openWindow(id:)` 不呈现 `Window`，而 Apple 文档示例用的 `Settings` + `openSettings()` 可以。bundle 内外、两种 main、两种激活策略都试过。`Settings` 也正是这个窗口的身份，顺带拿到 ⌘, 和 App 菜单项 |
