@@ -270,12 +270,49 @@ tool 这条路正是被挡的那条，文件也不行（沙盒 App 和宿主没�
 沙盒目标若缺 `com.apple.security.network.client`，连 localhost 也会被沙盒拒绝 —— 实测 Books、Maps、
 Calculator 都带这个 entitlement，但这不是保证，所以连接失败的错误信息里点名了这一条。
 
+### 调用方看不见选了哪条路
+
+`PeerMessaging` —— 两条路都能做的那四件事：发类型化请求、接类型化请求、看状态流、关掉。
+`PeerConnection` 现在细化自它，额外带两样只有 XPC 有的东西：可发布的 listener endpoint，以及
+SwiftyXPC 白送的那套按名字的无类型 RPC。
+
+**为什么不把 socket 塞进 `PeerConnection`**：`listenerEndpoint` 对 socket 毫无意义 —— 两边之所以
+靠推导约定端口，正是因为没有通道可以交换地址。硬套只会得到一堆唯一行为是抛错的方法。
+
+`PeerLink.host(...)` / `PeerLink.payload(...)` 把「探测 → 选路 → 构造对应的那一端」合成一步，返回
+`any PeerMessaging` 加上选中的 `transport`（值得记日志：链路起不来时它是第一个要知道的事，而线上
+看不出来）。**两边必须算出同一个答案**，把这段计算收在一处是唯一能防止它们漂移的办法 —— 宿主选
+XPC 而 payload 选 socket 不会报错，只会挂住。
+
+payload 侧的工厂**不收 pid**：payload 就是目标，它问 `getpid()`。传进来就等于造出一条让两边分歧的
+路，而那正是这套设计要排除的唯一故障。
+
+`HelperService` 也能挂在 socket 上（`PeerSocketHelperHandler`）。不然一个写一次的 service 会在非沙盒
+目标上正常、在沙盒目标上静默什么都不做。
+
+### 两阶段，socket 也一样
+
+`preparedListener(onPort:)` / `preparedDialer(toPort:)` 只构造不上线，`activate()` 才上线。理由与 XPC
+那边同构（见第四节）：socket 这边是 payload 的第一帧可能在 registry 还空着的时候就到了，对面会收到
+「没有注册处理器」—— 看起来像编程错误，实际是竞态。
+
+**顺序是固定的：宿主先起，payload 后拨。** 拨号方需要有东西可拨。放到生产里这句话读作「注入之前
+先把宿主这一端开起来」—— payload 对着还没起来的 listener 启动会得到 connection refused，而没有任何
+东西会去重试。
+
+**重连只有 XPC 有。** XPC 下能重连是因为 payload 的 listener 活得比宿主 App 久；socket 下 listener 在
+宿主这边，宿主重启后 payload 手里那条连接已经死了，而且没有办法把新的告诉它。
+`PeerLink.hostReconnecting(...)` 对沙盒目标直接抛错并说明这一点，而不是给出一条永远连不上的链路。
+
 ## 八、已知粗糙处
 
 - **注册表条目不会被清理** —— 这条已在共享 daemon 提案的清理批次中修掉：`MainService` 现在按注册方
   pid 挂 `DispatchSourceProcess`，进程退出即移除。
 - **XPC 握手仍然没有自动化测试**。上面第三、四节的握手时序是**读代码得出的**。socket 这条路有测试
-  （`PeerSocketChannelTests` 用两个真实的 loopback 端点对连，覆盖往返、并发配对、错误传播、取消与
-  超时），**XPC 那条没有** —— 不要把这里的绿色当成整个 `HelperPeer` 都被覆盖了。
+  （`PeerSocketChannelTests` 与 `PeerMessagingTests` 用两个真实的 loopback 端点对连，覆盖往返、并发
+  配对、错误传播、取消、超时、两阶段生命周期与 service 挂载），**XPC 那条没有** —— 不要把这里的
+  绿色当成整个 `HelperPeer` 都被覆盖了。
+- **`PeerLink` 的选路分支只有 socket 那一半被测到**。XPC 那半要求有一个活着的 daemon，测试进程里
+  没有；`PeerTransportSelection` 的判断本身另有测试覆盖。
 - **沙盒目标里的 socket 路径从未真跑过**。本仓库不做真实注入，所以上面关于沙盒的结论来自
   `sandbox_check` 的语义和 RuntimeViewer 的生产经验，不是本仓库测出来的。

@@ -2,47 +2,23 @@
 import Foundation
 public import HelperCommunication
 
-/// Abstraction over a brokered XPC peer connection (host ↔ peer process via a privileged tool).
+/// A ``PeerMessaging`` link carried by brokered XPC — host ↔ peer process via a privileged tool.
 ///
-/// `PeerConnection` is the unified surface exposed by `HelperPeerClient` and
-/// `HelperPeerServer`. Both sides may send typed `HelperCommunication.Request`s,
-/// register typed handlers, observe connection state, and surface their own listener
-/// endpoint (useful when the endpoint needs to be embedded in a business `Request`
-/// payload — e.g. an injected-app registry).
-public protocol PeerConnection: Actor, Sendable {
-    /// State stream — `.connecting → .connected` on initial handshake; transitions to
-    /// `.disconnected(_)` on transport failure or `.cancelled` after an explicit
-    /// `cancel()`. Finishes after `.cancelled` is yielded.
-    nonisolated var stateStream: AsyncStream<PeerConnectionState> { get }
-
+/// `PeerConnection` is the surface shared by `HelperPeerClient` and `HelperPeerServer`. On top
+/// of the four things every transport can do (see ``PeerMessaging``) it adds the two that are
+/// specific to XPC: an anonymous listener endpoint worth publishing, and the untyped name-keyed
+/// RPC SwiftyXPC provides.
+///
+/// Code that does not need those two should hold `any PeerMessaging` instead, so it keeps
+/// working when the sandbox forces the pair onto a loopback socket.
+public protocol PeerConnection: PeerMessaging {
     /// Own anonymous listener endpoint, suitable for embedding in `Request` payloads so
     /// peers can directly reconnect later.
-    var listenerEndpoint: HelperPeerEndpoint { get async }
-
-    /// Completes the handshake. Must be called exactly once after construction,
-    /// after any business message handlers have been installed via
-    /// `setMessageHandler(...)`. See the conforming type's docs for details.
     ///
-    /// - Important: `init` is intentionally a no-op on the wire — it only
-    ///   constructs the listener and the lib-internal handshake handlers.
-    ///   Callers MUST install every business handler before invoking
-    ///   `activate()`, otherwise the peer may receive inbound messages with
-    ///   no matching handler. Folding the handshake into `init` produces a
-    ///   silent race against handler installation; see the two-phase
-    ///   lifecycle notes on `HelperPeerClient` / `HelperPeerServer`.
-    func activate() async throws
-
-    /// Send a typed `Request` to the peer. Throws if no peer connection is established
-    /// yet, or the underlying XPC connection fails.
-    @discardableResult
-    func send<Request: HelperCommunication.Request>(_ request: Request) async throws -> Request.Response
-
-    /// Register a handler for a typed `Request`. Handlers run on the listener side and
-    /// can be added at any point during the peer's lifetime.
-    nonisolated func setMessageHandler<Request: HelperCommunication.Request>(
-        _ requestType: Request.Type,
-        handler: @escaping @Sendable (Request) async throws -> Request.Response
-    )
+    /// This is the member that does not generalise. A socket link has nothing to put here: the
+    /// two sides agree on a port by deriving it (``PeerPortDerivation``) precisely because they
+    /// have no channel on which to exchange an address.
+    var listenerEndpoint: HelperPeerEndpoint { get async }
 
     // MARK: - Untyped (name-based) RPC
 
@@ -69,9 +45,5 @@ public protocol PeerConnection: Actor, Sendable {
 
     /// Register a handler for a name-keyed message with both payload and response.
     nonisolated func setMessageHandler<Request: Codable, Response: Codable>(name: String, handler: @escaping @Sendable (Request) async throws -> Response)
-
-    /// Tear down the peer: closes the listener and both XPC connections, transitions
-    /// state to `.cancelled`, finishes the state stream. Idempotent.
-    func cancel() async
 }
 #endif

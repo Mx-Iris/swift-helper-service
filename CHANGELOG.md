@@ -70,6 +70,45 @@ This file starts at 0.2.0. Earlier releases are not covered.
   Not covered: a real sandboxed target. Nothing here performs an injection, so that conclusion
   rests on `sandbox_check`'s semantics and on RuntimeViewer's production experience.
 
+- **`PeerMessaging` and `PeerLink` — one surface over both transports.**
+
+  `PeerMessaging` is the four things every transport can do: send a typed request, answer one,
+  watch the state, cancel. `PeerConnection` now refines it and keeps the two members that are
+  specific to XPC — the publishable listener endpoint and the untyped name-keyed RPC.
+  `PeerSocketChannel` conforms, so code holding `any PeerMessaging` works on either path.
+
+  Making `PeerSocketChannel` conform to `PeerConnection` instead was the obvious move and the
+  wrong one: `listenerEndpoint` has no socket meaning — deriving the port is what the two sides
+  do *because* they have no channel on which to exchange an address — so conformance would be a
+  set of methods whose only behaviour is to throw.
+
+  `PeerLink.host(...)` / `PeerLink.payload(...)` probe, choose the transport, and construct the
+  matching end in one step, returning the link together with the `PeerTransport` that was
+  chosen. Both sides must compute the same answer, and keeping that computation in one place is
+  what stops them drifting: a host on XPC with its payload on a socket does not fail, it hangs.
+  The payload factory deliberately takes no pid — the payload is the target, so it asks
+  `getpid()`.
+
+  `PeerLink.hostReconnecting(...)` throws for a sandboxed target rather than returning a link
+  that never connects. Reconnecting works over XPC because the payload's listener outlives the
+  host app; on the socket path the host is the listener, so a restarted host leaves its payload
+  holding a dead connection with no way to be told about the new one.
+
+  `HelperService`s mount on a socket link too (`PeerSocketHelperHandler`). Without that, a
+  service written once would work on unsandboxed targets and silently do nothing on sandboxed
+  ones.
+
+- **`PeerSocketChannel` has the same two-phase lifecycle as the XPC peers.**
+  `preparedListener(onPort:)` / `preparedDialer(toPort:)` construct without touching the wire;
+  `activate()` starts it. Install handlers in between — the payload's first frame can arrive
+  before the handler registry has anything in it, and the far side is then told no handler
+  exists, which reads like a programming error rather than a race.
+
+  `listen(onPort:)` and `connect(toPort:)` remain as the both-phases convenience.
+
+  The order between the two ends is fixed: **host first, then payload.** The dialer needs
+  something to dial; in production that reads as "open the host link before injecting".
+
 ### Changed
 
 - **`InjectionService` checks the payload's architecture and signature before injecting.** Both

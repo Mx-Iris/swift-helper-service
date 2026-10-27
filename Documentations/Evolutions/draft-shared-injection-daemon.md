@@ -477,16 +477,25 @@ SwiftyXPC 一旦开始回复，该测试就会失败，判别器随即恢复可�
    另外把「选哪个切片」的推断从文件读取里拆出来（`preferredExecutingArchitecture(from:)`），否则它
    只能靠机器上恰好存在的二进制来测——实测 `/bin/ls` 是 `x86_64 arm64e`，没有纯 arm64 切片，而
    `/usr/lib/libobjc.A.dylib` 在磁盘上根本不存在（已并入 dyld shared cache），这两条都写进了测试。
-6. **[进行中]** **标准回传通道。**
+6. **[已完成]** **标准回传通道。**
    - **[已完成]** 选路与端口推导：C 侧的 `mach-lookup` 探测、`PeerTransport` / `PeerTransportSelection`
      / `PeerPortDerivation`，以及 9 个测试（全量 66 个通过）。原定的「绑 0 + 经注册表上报」在此被
      推翻，改为角色反转 + 确定性推导，理由见上文「标准通道的选路」。`InjectedEndpointInfo` 不动。
    - **[已完成]** socket 传输层：`PeerSocketFraming`（长度前缀分帧）与 `PeerSocketChannel`
      （建在 Network.framework 上，带 correlation 配对、超时、取消唤醒等待者）。19 个新测试，
      其中 8 个是**两个真实 loopback 端点对连**的集成测试，全量 85 个通过。
-   - **[待做]** 把 socket 这条路接进 `HelperPeerClient` / `HelperPeerServer` 的生命周期 ——
-     目前 `PeerSocketChannel` 是能独立使用的类型，但还没有统一在 `PeerConnection` 协议之下
-     （那个协议为 XPC 而设，`listenerEndpoint` 对 socket 没有意义，硬套会得到一堆抛错的占位方法）。
+   - **[已完成]** 两条路统一在一个调用面之下。**没有**把 socket 塞进 `PeerConnection` ——
+     `listenerEndpoint` 对 socket 毫无意义，硬套只会得到一堆唯一行为是抛错的方法。改为抽出
+     `PeerMessaging`（两条路都能做的四件事），让 `PeerConnection` 细化自它并保留 XPC 专有的两样；
+     `PeerSocketChannel` 遵循 `PeerMessaging`，并补上与 XPC 同构的两阶段生命周期
+     （`preparedListener` / `preparedDialer` + `activate()`）。`PeerLink.host(...)` /
+     `PeerLink.payload(...)` 把「探测 → 选路 → 构造对应的那一端」合成一步。`HelperService` 经
+     `PeerSocketHelperHandler` 也能挂在 socket 上。6 个新测试，全量 91 个通过。
+
+     两处落地时才清楚的事实：**两端的启动顺序是固定的（宿主先起、payload 后拨）**，生产里读作
+     「注入之前先把宿主这一端开起来」；以及**重连只有 XPC 有** —— socket 下 listener 在宿主这边，
+     宿主重启后 payload 手里的连接已死且无法被告知新的，`hostReconnecting` 对沙盒目标直接抛错
+     并说明原因，而不是给出一条永远连不上的链路。
 7. **抽出 `HookKit`。** 从 `InjectionScaffold` 模板搬进平台客户端库，保留它现有的签名校验、多候选
    拼写与原子安装语义。
 8. **菜单栏管理界面。** daemon 状态、已注入进程列表（只读 + 退出目标 App）、开发模式警告、升级入口

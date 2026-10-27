@@ -25,7 +25,7 @@ import FoundationToolbox
 /// processes on this machine — the same ones that could already talk to the daemon. Adding TLS
 /// here would protect against nothing that is not already lost.
 @Loggable(subsystem: "com.JH.HelperPeer", category: "Socket")
-public actor PeerSocketChannel {
+public actor PeerSocketChannel: PeerMessaging {
     public enum Error: LocalizedError {
         case listenerFailed(any Swift.Error)
         case connectionFailed(any Swift.Error)
@@ -74,6 +74,8 @@ public actor PeerSocketChannel {
 
     private var isCancelled = false
 
+    private var hasActivated = false
+
     // MARK: - Construction
 
     private init(listener: NWListener?, connection: NWConnection?) {
@@ -86,12 +88,15 @@ public actor PeerSocketChannel {
         capturedContinuation.yield(.connecting)
     }
 
-    /// Host side: binds `port` on loopback and waits for the payload to connect.
+    /// Host side, phase one: claims `port` on loopback without yet accepting anything.
     ///
-    /// Call this **before** injecting. The payload dials the moment it starts, and a listener
-    /// that is not up yet means a connection refused — which the payload cannot retry forever
-    /// without looking like a hang.
-    public static func listen(onPort port: UInt16) async throws -> PeerSocketChannel {
+    /// Nothing is on the wire until ``activate()``. Install the handlers in between — the
+    /// payload's first frame can arrive immediately after the accept, and a handler registered
+    /// a moment later is a handler the payload was told does not exist.
+    ///
+    /// Note that the bind can still fail at ``activate()`` rather than here: `NWListener`
+    /// reports a port it cannot hold through its state handler, not from its initialiser.
+    public static func preparedListener(onPort port: UInt16) throws -> PeerSocketChannel {
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: .init(rawValue: port)!)
         parameters.allowLocalEndpointReuse = true
@@ -102,23 +107,56 @@ public actor PeerSocketChannel {
         } catch {
             throw Error.listenerFailed(error)
         }
+        return PeerSocketChannel(listener: listener, connection: nil)
+    }
 
-        let channel = PeerSocketChannel(listener: listener, connection: nil)
-        await channel.startListening()
+    /// Payload side, phase one: aims at the host's port without dialling yet.
+    public static func preparedDialer(toPort port: UInt16) -> PeerSocketChannel {
+        let endpoint = NWEndpoint.hostPort(host: .ipv4(.loopback), port: .init(rawValue: port)!)
+        return PeerSocketChannel(listener: nil, connection: NWConnection(to: endpoint, using: .tcp))
+    }
+
+    /// Host side, both phases: binds `port` on loopback and waits for the payload to connect.
+    ///
+    /// Call this **before** injecting. The payload dials the moment it starts, and a listener
+    /// that is not up yet means a connection refused — which the payload cannot retry forever
+    /// without looking like a hang.
+    ///
+    /// Only safe when no handler needs to be in place before the payload's first message; see
+    /// ``preparedListener(onPort:)`` otherwise.
+    public static func listen(onPort port: UInt16) async throws -> PeerSocketChannel {
+        let channel = try preparedListener(onPort: port)
+        try await channel.activate()
         return channel
     }
 
-    /// Payload side: connects to the host on loopback.
+    /// Payload side, both phases: connects to the host on loopback.
     public static func connect(toPort port: UInt16) async throws -> PeerSocketChannel {
-        let endpoint = NWEndpoint.hostPort(host: .ipv4(.loopback), port: .init(rawValue: port)!)
-        let connection = NWConnection(to: endpoint, using: .tcp)
-
-        let channel = PeerSocketChannel(listener: nil, connection: connection)
-        await channel.startConnecting(connection)
+        let channel = preparedDialer(toPort: port)
+        try await channel.activate()
         return channel
     }
 
     // MARK: - Lifecycle
+
+    /// Phase two: starts the listener or dials out. Call once, after the handlers are installed.
+    ///
+    /// Returns as soon as the socket is started, not when the far side has arrived — a listener
+    /// has nobody to wait for until the payload is injected. Watch ``stateStream`` for
+    /// `.connected`.
+    public func activate() async throws {
+        guard !isCancelled else { throw Error.cancelled }
+        guard !hasActivated else { return }
+        hasActivated = true
+
+        if listener != nil {
+            startListening()
+        } else if let connection {
+            startConnectionLifecycle(connection)
+        } else {
+            throw Error.notConnected
+        }
+    }
 
     private func startListening() {
         guard let listener else { return }
@@ -145,10 +183,6 @@ public actor PeerSocketChannel {
         }
         connection = newConnection
         startConnectionLifecycle(newConnection)
-    }
-
-    private func startConnecting(_ connection: NWConnection) {
-        startConnectionLifecycle(connection)
     }
 
     private func startConnectionLifecycle(_ connection: NWConnection) {
@@ -284,11 +318,21 @@ public actor PeerSocketChannel {
 
     // MARK: - Sending
 
-    /// Sends a typed request and waits for its response.
+    /// Sends a typed request and waits for its response, for ``defaultRequestTimeout``.
+    ///
+    /// Spelled as its own method rather than a defaulted parameter on the one below: a default
+    /// argument does not witness a protocol requirement that has no such parameter, and
+    /// ``PeerMessaging`` declares the one-argument form.
+    @discardableResult
+    public func send<Request: HelperCommunication.Request>(_ request: Request) async throws -> Request.Response {
+        try await send(request, timeout: Self.defaultRequestTimeout)
+    }
+
+    /// Sends a typed request and waits for its response, for `timeout` seconds.
     @discardableResult
     public func send<Request: HelperCommunication.Request>(
         _ request: Request,
-        timeout: Double = PeerSocketChannel.defaultRequestTimeout
+        timeout: Double
     ) async throws -> Request.Response {
         guard !isCancelled else { throw Error.cancelled }
 
