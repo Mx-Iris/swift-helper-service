@@ -90,5 +90,31 @@ public actor HelperClient {
         guard let toolConnection else { throw Error.invalidConnection }
         return try await toolConnection.sendMessage(request: FetchVersionRequest()).version
     }
+
+    /// Returns the installed tool's version, interpreted as `major.minor.patch`, or `nil` when it
+    /// reported something else.
+    public func fetchToolVersionNumber() async throws -> HelperToolVersion? {
+        HelperToolVersion(parsing: try await fetchToolVersion())
+    }
+
+    /// Checks that the installed tool is new enough for this client, throwing
+    /// ``HelperToolVersionMismatch`` when it is not.
+    ///
+    /// **This is how to find out that a tool is outdated.** The alternative that suggests itself —
+    /// sending a newer message and inspecting the failure — cannot work:
+    /// ``HelperClient/errorIndicatesOutdatedPeer(_:)`` never returns `true`, because a tool that
+    /// does not recognise a message hands the error to its own handler and never replies, leaving
+    /// the caller with `connectionInterrupted`. Ask first; do not infer.
+    ///
+    /// Call it right after `connectToTool(...)`, before sending anything version-dependent.
+    public func requireToolVersion(atLeast minimum: HelperToolVersion) async throws {
+        let reported = try await fetchToolVersion()
+        guard let installed = HelperToolVersion(parsing: reported) else {
+            throw HelperToolVersionMismatch.toolVersionIsUnreadable(reported: reported, required: minimum)
+        }
+        guard installed >= minimum else {
+            throw HelperToolVersionMismatch.toolIsOlderThanRequired(installed: installed, required: minimum)
+        }
+    }
 }
 #endif

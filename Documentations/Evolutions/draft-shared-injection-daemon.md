@@ -414,10 +414,12 @@ SwiftyXPC 一旦开始回复，该测试就会失败，判别器随即恢复可�
    `HelperService.run()`、删除 `HelperTool`、`MainService` 注册表接上 `DispatchSourceProcess` 清理。
    更新架构总览第八节、`AGENTS.md` 与 `CHANGELOG.md`。这一步不依赖平台，可单独构建与测试。
    新增测试 target `MainServiceTests`（3 个用例，拿真实子进程的退出驱动），全量 44 个测试通过。
-2. **冻结接口，并把版本协商定死。** 在 `Documentations/Architecture/` 写明只增不改的承诺与其边界。
-   `FetchVersionRequest` 目前只回一个自由格式字符串，这里约定它必须是 `major.minor.patch`，并提供
-   一个比较用的类型，使客户端能表达「我要求 daemon ≥ x.y.z」。同时在文档里写明：**判断 daemon 是否
-   过旧一律用这条主动查询，不得依赖 `errorIndicatesOutdatedPeer(_:)`**（它不可能返回 `true`）。
+2. **[已完成]** **冻结接口，并把版本协商定死。** 新增
+   [WireCompatibility.md](../Architecture/WireCompatibility.md)：只增不改的承诺、已经是线格式的
+   四样东西、允许与不允许的演进、改动前的检查清单。新增 `HelperToolVersion`（可比较、可解析）与
+   `HelperClient.requireToolVersion(atLeast:)`，线格式不变（`FetchVersionRequest` 仍回 `String`，
+   这个类型是对它的约定解释）。文档写明**判断 daemon 是否过旧一律用主动查询，不得依赖
+   `errorIndicatesOutdatedPeer(_:)`**。术语表新增 `wire format`。全量 50 个测试通过。
 3. **新建 `InjectionPlatform` 仓库。** App 外壳 + daemon，走通 `SMAppService` 注册。**本步的验收标准
    是构建产物校验通过** —— daemon 与 payload 都带 arm64e 切片，照搬脚手架的六处配置与构建后校验。
 4. **接入信任模型。** 签名白名单、开发模式开关（daemon 侧持久化，仅平台 App 可改）、Debug/Release

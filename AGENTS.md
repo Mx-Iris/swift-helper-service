@@ -7,7 +7,7 @@ Guidance for coding agents working in this repository. `CLAUDE.md` is a symlink 
 
 `swift-helper-service` is a Swift Package that eliminates boilerplate when building a macOS privileged helper tool installed via `SMAppService.daemon(plistName:)`. It provides a typed, async/await-based XPC framework on top of `SwiftyXPC`, plus a discovery/endpoint-registry pattern so a single privileged helper can broker connections to any number of additional XPC servers.
 
-**This file is a lookup table, not an explanation.** For *why* the design is shaped this way — the topology, the module split, the visibility rules, the peer handshake — read [`Documentations/Architecture/Overview.md`](Documentations/Architecture/Overview.md) first; the three sibling documents go deeper per area. Decision history lives in [`Documentations/Evolutions/`](Documentations/Evolutions/README.md).
+**This file is a lookup table, not an explanation.** For *why* the design is shaped this way — the topology, the module split, the visibility rules, the peer handshake — read [`Documentations/Architecture/Overview.md`](Documentations/Architecture/Overview.md) first; the sibling documents go deeper per area. Decision history lives in [`Documentations/Evolutions/`](Documentations/Evolutions/README.md).
 
 ## Build & Test
 
@@ -123,8 +123,9 @@ do its own wrapping.**
 
 ## Versioning
 
-- `HelperServer.init(serverType:version:services:)` requires a version string. `MainService` exposes it via `FetchVersionRequest` (`com.JH.HelperCommunication.FetchVersion`).
-- Host apps call `HelperClient.fetchToolVersion()`. `HelperClient.errorIndicatesOutdatedPeer(_:)` is meant to tell "tool is outdated, reinstall" apart from transient XPC failures, and returns `true` only for `SwiftyXPC.XPCConnection.Error.unexpectedMessage`.
+- `HelperServer.init(serverType:version:services:)` requires a version string, and it **must be `major.minor.patch`** — that format is now part of the wire contract, see [WireCompatibility.md](Documentations/Architecture/WireCompatibility.md). `MainService` exposes it via `FetchVersionRequest` (`com.JH.HelperCommunication.FetchVersion`).
+- **To find out whether a tool is too old, ask: `HelperClient.requireToolVersion(atLeast:)`.** It fetches the version, parses it into a `HelperToolVersion`, and throws `HelperToolVersionMismatch` when the tool is older or reports something unparseable. Do not compare the raw strings — `"0.10.0" < "0.9.0"` is `true`, and a test pins that trap.
+- Host apps can still call `HelperClient.fetchToolVersion()` for the raw string, or `fetchToolVersionNumber()` for the parsed form. `HelperClient.errorIndicatesOutdatedPeer(_:)` is meant to tell "tool is outdated, reinstall" apart from transient XPC failures, and returns `true` only for `SwiftyXPC.XPCConnection.Error.unexpectedMessage`.
 - **That discriminator cannot fire in practice — assume an outdated tool is indistinguishable from a dropped connection.** SwiftyXPC throws `unexpectedMessage` in exactly one place (`XPCConnection.respond(to:)`, on an unknown message name) and that path hands the error to the *receiving* process's own `errorHandler` and returns **without replying**. The caller waits, then gets `XPCError.connectionInterrupted`. So a tool predating `FetchVersionRequest` reads as a transient failure. Present since `a49e713`; found while writing Evolution 0002's round-trip tests, and pinned by `unhandledMessageDoesNotReachTheCallerAsUnexpectedMessage` — **if that test ever fails, upstream started replying and the discriminator can be trusted again.**
 
 ## Installation path
@@ -135,7 +136,7 @@ There is exactly one. The legacy `SMJobBless` flow (`installTool(name:)`, `kSMRi
 
 ## Documentation
 
-- **`Documentations/Architecture/` explains why the design looks like this.** [Overview.md](Documentations/Architecture/Overview.md) is the entry point; [ModuleLayering.md](Documentations/Architecture/ModuleLayering.md), [TypedMessaging.md](Documentations/Architecture/TypedMessaging.md), and [BrokeredPeer.md](Documentations/Architecture/BrokeredPeer.md) go deeper per area. This file is the lookup table; those carry the reasoning. When the two disagree, the source wins — then fix both.
+- **`Documentations/Architecture/` explains why the design looks like this.** [Overview.md](Documentations/Architecture/Overview.md) is the entry point; [ModuleLayering.md](Documentations/Architecture/ModuleLayering.md), [TypedMessaging.md](Documentations/Architecture/TypedMessaging.md), [BrokeredPeer.md](Documentations/Architecture/BrokeredPeer.md), and [WireCompatibility.md](Documentations/Architecture/WireCompatibility.md) go deeper per area. **Read WireCompatibility before touching any `Request`, `identifier`, `errorDomain` or `rawValue`** — those are wire format, and breaking them produces no compile error. This file is the lookup table; those carry the reasoning. When the two disagree, the source wins — then fix both.
 - `Documentations/Guides/` is for contracts a caller cannot infer from a signature. [InjectionPrerequisites.md](Documentations/Guides/InjectionPrerequisites.md) is the host-machine state injection depends on — **disabling SIP does not disable library validation**; the switch is `DisableLibraryValidation` in `/Library/Preferences/com.apple.security.libraryvalidation.plist`.
 - `Documentations/README.md` is the index — **every new or renamed document must be registered there**.
 - `Documentations/Evolutions/NNNN-*.md` holds one proposal per substantive change, covering its whole lifecycle from research to landing. Do not split a change into separate design / plan / report files. `Documentations/Evolutions/README.md` is the status table and declares the project kind (**library, source-distributed** — so proposals fill in source compatibility and write "not applicable" for ABI).

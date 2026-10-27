@@ -187,4 +187,5 @@ XPC 类型放进业务消息时，用 `HelperPeerEndpoint` 这个不透明包装
 | [ModuleLayering.md](ModuleLayering.md) | 模块怎么切、可见性为什么这么定、Interface/Implementation 拆分的规矩 | 新增一个服务、或想把某个 `package` 放开成 `public` 之前 |
 | [TypedMessaging.md](TypedMessaging.md) | `Request`/`Response` 协议层的设计，identifier 作为路由键，为什么不用 `NSXPCInterface` | 新增一种消息、或排查「消息发出去没人接」时 |
 | [BrokeredPeer.md](BrokeredPeer.md) | `HelperPeer` 的握手/重连协议，两阶段生命周期为什么必须存在 | 用 `HelperPeerClient` / `HelperPeerServer`，或排查握手竞态时 |
+| [WireCompatibility.md](WireCompatibility.md) | 「只增不改」的承诺、哪些东西已经是线格式、版本协商为什么必须主动问 | 动任何 `Request`、`identifier`、`errorDomain` 或 `rawValue` 之前 |
 | [Evolutions/](../Evolutions/README.md) | 每次实质变更的提案（决策过程、被否方案、实测数据） | 想知道「当初为什么这么改」 |

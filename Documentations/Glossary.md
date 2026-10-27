@@ -94,6 +94,21 @@ payload 映射为可执行。这是**唯一**仍然直接决定走 remap 路径�
 
 - **主要出现在**：`Sources/HelperProcessProbe/HelperProcessProbe.c`
 
+### wire format（线格式）
+
+本项目里特指**改动之后不会产生编译错误、只会在运行期让两端静默失配**的那些值。目前有四样：
+`Request.identifier`（XPC 消息名）、`HelperServiceFailure.errorDomain`、`InjectionStrategy` 的
+`rawValue`，以及 `FetchVersionRequest` 回的版本串必须是 `major.minor.patch` 这条**格式**约定。
+
+**与「源码兼容性」是两回事**，而且可以各自独立地破坏：去掉 `HelperServerType.plain` 的一个废参数
+是源码破坏但线格式不变；给某个 `Request` 加一个必填字段可能连 Swift 签名都没怎么变，线格式却已经
+断了。判断时看的是消息，不是签名。
+
+共享 daemon 出现之前，本库的 tool 与宿主 App 总是一起编译、一起升级，线格式失配没有存在的空间；
+之后才需要「只增不改」这条明确承诺。
+
+- **延伸阅读**：[WireCompatibility.md](Architecture/WireCompatibility.md)
+
 ### 两阶段激活（two-phase activation）
 
 `HelperPeerClient` / `HelperPeerServer`（以及 `HelperServer`）刻意把生命周期切成 `init` 和

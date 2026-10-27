@@ -8,6 +8,22 @@ This file starts at 0.2.0. Earlier releases are not covered.
 
 ## [Unreleased]
 
+### Added
+
+- **`HelperToolVersion` and `HelperClient.requireToolVersion(atLeast:)`.** Ask the tool whether it
+  is new enough, rather than trying to infer it from a failure —
+  `HelperClient.errorIndicatesOutdatedPeer(_:)` cannot return `true`, so an outdated tool is
+  indistinguishable from a dropped connection. `requireToolVersion(atLeast:)` throws
+  `HelperToolVersionMismatch` when the tool is older than required, or reports a version that is
+  not `major.minor.patch`.
+
+  The wire format is unchanged: `FetchVersionRequest` still answers with a `String`.
+  `HelperToolVersion` is the agreed interpretation of it, and exists because comparing those
+  strings directly is wrong — `"0.10.0" < "0.9.0"` is `true`.
+
+  **The version string a daemon reports must now be `major.minor.patch`.** That format is part of
+  the wire contract; see `Documentations/Architecture/WireCompatibility.md`.
+
 ### Fixed
 
 - **The endpoint registry no longer grows forever.** A sub-server or peer that exited used to leave

@@ -8,7 +8,7 @@
 ## 从这里开始
 
 **第一次接触这个库** → [Architecture/Overview.md](Architecture/Overview.md)。它从「这个包解决什么
-问题」讲起，交代核心设计决策（特权进程只做介绍人、不做中间人）和一条消息的完整路径。其余三篇都
+问题」讲起，交代核心设计决策（特权进程只做介绍人、不做中间人）和一条消息的完整路径。其余几篇都
 预设你读过它。
 
 **卡在某个名词上** → [Glossary.md](Glossary.md)。
@@ -28,10 +28,11 @@
 
 | 文档 | 讲什么 | 什么时候读 |
 |---|---|---|
-| [Overview.md](Architecture/Overview.md) | 全景。它解决什么问题；核心决策「特权进程只做介绍人不做中间人」及其推论；四种进程角色；一条消息的完整路径；模块依赖图；贯穿全局的三条约束；已知粗糙处。 | **第一篇**。其余三篇都建立在它之上。 |
+| [Overview.md](Architecture/Overview.md) | 全景。它解决什么问题；核心决策「特权进程只做介绍人不做中间人」及其推论；四种进程角色；一条消息的完整路径；模块依赖图；贯穿全局的三条约束；已知粗糙处。 | **第一篇**。其余几篇都建立在它之上。 |
 | [ModuleLayering.md](Architecture/ModuleLayering.md) | 模块为什么切成这样。Interface/Implementation 拆分的规矩与一次真实的边界考验；`HelperService` 为何是纯协议 target；`package` vs `public` 的判定标准与注册表类型为何刻意不 public；平台门禁；`@preconcurrency` / `@retroactive` 为何不能删。 | 新增一个服务、或想把某个 `package` 放开成 `public` 之前。 |
 | [TypedMessaging.md](Architecture/TypedMessaging.md) | `Request`/`Response` 协议层。原生 XPC 的三类隐形错误；`identifier` 是路由键（因而是线格式的一部分）；为什么不用 `NSXPCInterface`；新增消息的完整步骤与兼容性演进；`HelperPeerEndpoint` 为何与裸 `XPCEndpoint` 线格式逐位相同。 | 新增一种消息、排查「消息发出去没人接」、或改动任何 `identifier` 之前。 |
 | [BrokeredPeer.md](Architecture/BrokeredPeer.md) | `HelperPeer` 的独立握手协议。Client/Server 命名为何容易误导；初次握手与重连的完整时序；**两阶段 `init` + `activate()` 为何必须存在**（否则有静默丢消息的竞态）；状态流为何用 `AsyncStream` 而非 Combine；与 `HelperServer`/`HelperClient` 的对照表。 | 用 `HelperPeerClient` / `HelperPeerServer`，或排查握手竞态时。**改动握手顺序前必读。** |
+| [WireCompatibility.md](Architecture/WireCompatibility.md) | 「只增不改」的承诺：共享 daemon 服务多个独立发版的客户端之后，为什么线格式必须冻结；哪四样东西已经是线格式；允许与不允许的演进；版本协商为什么必须主动问（`errorIndicatesOutdatedPeer` 不可能返回 `true`）；改动前的检查清单。 | 动任何 `Request`、`identifier`、`errorDomain` 或 `rawValue` 之前。 |
 
 ### Guides —— 使用指南
 
@@ -59,7 +60,7 @@
 ### 其他
 
 - [术语表](Glossary.md) —— 目前收录 `library validation`（「请求」与「强制」之别）、`report page`、
-  `seatbelt`、`broker`、`endpoint registry`、`两阶段激活` 六条。
+  `seatbelt`、`broker`、`endpoint registry`、`wire format`、`两阶段激活` 七条。
 
 ## 约定
 
