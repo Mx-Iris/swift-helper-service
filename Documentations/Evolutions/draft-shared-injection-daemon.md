@@ -430,8 +430,17 @@ SwiftyXPC 一旦开始回复，该测试就会失败，判别器随即恢复可�
    `ENABLE_POINTER_AUTHENTICATION` 有没有被误提到项目级的判据。launchd plist 的 `Label` /
    `BundleProgram` / `MachServices` 三处一致，Debug 带 `.debug` 后缀。
    `SMAppService` 的实际注册需要用户在「登录项」批准，留到有界面之后一并验。
-4. **接入信任模型。** 签名白名单、开发模式开关（daemon 侧持久化，仅平台 App 可改）、Debug/Release
-   分服务名。
+4. **[已完成]** **接入信任模型。** 库侧给 `HelperServer.init` 加可选的 `codeSigningRequirement`
+   （默认 `nil`，保持源码兼容；`HelperPeer` 的三个匿名 listener 维持 `nil` 并加注释说明为什么）。
+   平台侧 daemon 用 Team ID 要求，并新增 `DeveloperModeService`（Interface / Implementation 拆分）
+   与 root 拥有的开关文件。Debug/Release 分服务名脚手架已有。
+   新增 7 个测试，**反向验证过**：把失败兜底值从「关闭」翻成「开启」，6 个断言立刻变红。
+
+   两处落地时才清楚的事实：**要求在 listener 构造时定死**，运行中换不了，所以切换开发模式必须重装
+   daemon，而 `FetchDeveloperModeRequest` 要同时回「磁盘上的状态」和「正在跑的 daemon 是否真的在
+   验」——两者在重启前不一致。以及**开发模式比设想的窄**：本项目设了 `DEVELOPMENT_TEAM`，Xcode 连
+   Debug 构建都用 Apple Development 证书签名、leaf 的 OU 即 Team ID，本来就满足要求；它只对完全没有
+   可用签名的二进制（ad-hoc、无证书的机器、团队外客户端）才有意义。
 5. **注入前校验。** 架构切片、platform、签名三项，失败经提案 0002 的错误通道带描述返回。
 6. **标准回传通道。** payload 侧 Swift 库：XPC 优先、seatbelt 挡住则绑 0 取端口退回本地 socket、
    经端点注册表上报。`InjectedEndpointInfo` 追加 `localSocketPort`。
