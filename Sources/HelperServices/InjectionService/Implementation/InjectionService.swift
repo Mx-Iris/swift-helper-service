@@ -69,7 +69,6 @@ public actor InjectionService: HelperService {
         }
     }
 
-    public func run() async throws {}
 
     /// Loads `request.dylibURL` into `request.pid`, attempting the simpler
     /// `dlopen` path first and falling back to `mach_vm_remap` only once the

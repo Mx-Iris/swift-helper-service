@@ -38,7 +38,7 @@ public actor HelperServer {
     }
 
     public func connectToTool(machServiceName: String, isPrivilegedHelperTool: Bool) async throws {
-        guard case .plain(_, let identifier) = serverType else {
+        guard case .plain(let identifier) = serverType else {
             return
         }
         let connection = try SwiftyXPC.XPCConnection(type: .remoteMachService(serviceName: machServiceName, isPrivilegedHelperTool: isPrivilegedHelperTool))

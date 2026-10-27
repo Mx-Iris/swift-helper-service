@@ -9,9 +9,19 @@ extension SwiftyXPC.XPCConnection {
     }
 
     /// Registers an `XPCEndpoint` with the tool's `MainService` endpoint registry, keyed by `(machServiceName, identifier)`.
+    ///
+    /// The caller's pid rides along so the registry can evict the entry when this process exits;
+    /// callers do not supply it, because a registrant reporting anything other than its own pid
+    /// would only ever be wrong.
     package func registerEndpoint(_ endpoint: SwiftyXPC.XPCEndpoint, machServiceName: String, identifier: String) async throws {
         let info = HelperServerInfo(name: machServiceName, identifier: identifier)
-        try await sendMessage(request: RegisterEndpointRequest(info: info, endpoint: endpoint))
+        try await sendMessage(
+            request: RegisterEndpointRequest(
+                info: info,
+                endpoint: endpoint,
+                registrantProcessIdentifier: getpid()
+            )
+        )
     }
 
     /// Fetches a previously registered `XPCEndpoint` from the tool's `MainService` endpoint registry.

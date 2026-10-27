@@ -6,6 +6,52 @@ source-breaking changes.
 
 This file starts at 0.2.0. Earlier releases are not covered.
 
+## [Unreleased]
+
+### Fixed
+
+- **The endpoint registry no longer grows forever.** A sub-server or peer that exited used to leave
+  its `XPCEndpoint` in `MainService`'s registry, so the next client to look it up received a handle
+  it could never connect to. Entries are now evicted when the process that registered them exits.
+
+  `RegisterEndpointRequest` gained an optional `registrantProcessIdentifier`, filled in by the
+  `registerEndpoint` behaviour extension rather than by callers. It is optional on purpose: a peer
+  built before this field existed sends a message without it, which decodes to `nil` and leaves
+  that one entry with the old grows-only behaviour instead of failing the registration.
+
+### Removed
+
+- **`HelperService.run()` is gone.** Nothing ever called it and every implementation was an empty
+  `{}`. Removing a protocol requirement does not break conforming types — a leftover `run()` on
+  your service still compiles, it is simply no longer an override. Only a direct `service.run()`
+  call would break, and there were none.
+- **`HelperTool` is gone.** Dead `package` actor with no references; never part of the public API.
+  Not to be confused with `pingHelperTool()` / `isPrivilegedHelperTool`, which are live.
+
+### Changed
+
+- **`HelperServerType.plain(name:identifier:)` → `.plain(identifier:)`.** The `name` was never
+  read: `HelperServer` destructured the case as `case .plain(_, let identifier)`, and the registry
+  key's `name` has always come from `connectToTool(machServiceName:)`.
+
+  Construction keeps working through a deprecated static factory, so existing call sites compile
+  with a warning:
+
+  ```
+  'plain(name:identifier:)' is deprecated: The name was never read; use .plain(identifier:) instead
+  ```
+
+  **Pattern matching does break**, and no deprecation can soften it. A downstream that destructures
+  the case sees:
+
+  ```
+  error: tuple pattern has the wrong length for tuple type '(identifier: String)'
+  ```
+
+  Fix by dropping the first binding: `case .plain(let identifier)`.
+
+- `MainService`'s process monitors run on a private serial queue instead of `.main`.
+
 ## [0.3.1] — 2026-08-11
 
 ### Changed

@@ -54,9 +54,17 @@ package struct RegisterEndpointRequest: Codable, Request {
 
     package let endpoint: SwiftyXPC.XPCEndpoint
 
-    package init(info: HelperServerInfo, endpoint: SwiftyXPC.XPCEndpoint) {
+    /// The registrant's own pid, so the registry can drop the entry when that process exits.
+    ///
+    /// Optional because it is additive: a peer built before this field existed sends a message
+    /// without it, which decodes to `nil` and leaves the registry with its original
+    /// grows-only behaviour for that entry rather than failing the registration outright.
+    package let registrantProcessIdentifier: pid_t?
+
+    package init(info: HelperServerInfo, endpoint: SwiftyXPC.XPCEndpoint, registrantProcessIdentifier: pid_t?) {
         self.info = info
         self.endpoint = endpoint
+        self.registrantProcessIdentifier = registrantProcessIdentifier
     }
 }
 

@@ -284,5 +284,13 @@ let package = Package(
                 "InjectionServiceImplementation",
             ],
         ),
+        .testTarget(
+            name: "MainServiceTests",
+            dependencies: [
+                "MainService",
+                "HelperCommunication",
+                .product(name: "SwiftyXPC", package: "SwiftyXPC"),
+            ],
+        ),
     ],
 )

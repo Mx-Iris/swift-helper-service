@@ -33,7 +33,6 @@ public actor InjectedEndpointRegistryService: HelperService {
         }
     }
 
-    public func run() async throws {}
 
     private func registerInjectedEndpoint(request: RegisterInjectedEndpointRequest) async throws -> RegisterInjectedEndpointRequest.Response {
         let info = InjectedEndpointInfo(

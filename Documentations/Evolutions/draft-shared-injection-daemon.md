@@ -1,6 +1,6 @@
 # Draft - 一个共享的注入 daemon
 
-- **状态**: Accepted
+- **状态**: In Progress
 - **作者**: JH
 - **创建日期**: 2026-10-27
 - **最后更新**: 2026-10-27
@@ -204,6 +204,14 @@ arm64e」。这句话对 `swift build` 成立，对 `xcodebuild` 不成立：`Lo
 1. **归属与安装。** 新仓库 `Personal/App/InjectionPlatform`，菜单栏常驻 App，daemon 嵌在其中走
    `SMAppService` 注册，label `com.JH.injectiond`。本库的改动仍留在本仓库。
 
+   **App 的 UI 技术栈**：生命周期仍由 AppKit 掌管（`NSApplicationDelegate`），**SwiftUI 不接管
+   生命周期**；状态栏界面用 SwiftUI 写，控件用
+   [`MacControlCenterUI`](https://github.com/orchetect/MacControlCenterUI)（MIT，macOS 11+），
+   经 `NSHostingSceneRepresentation` + `NSApplication.addSceneRepresentation(_:)` 挂进 AppKit
+   宿主。`NSHostingSceneRepresentation` 是 **macOS 26.0** 引入的，因此平台 App 的部署目标定在
+   macOS 26.0 —— 这只约束平台 App，不影响本库（仍是 macOS 10.15+，新 API 逐调用点 `@available`
+   门禁）。
+
 2. **特权面。** daemon 里只有 `InjectionService` 与端点注册表。`FilesService`、`ApplicationsService`
    这些不需要 root 的照旧跑在各客户端自己的非特权 sub-server 里。
 
@@ -402,9 +410,10 @@ SwiftyXPC 一旦开始回复，该测试就会失败，判别器随即恢复可�
 
 ## 落地步骤
 
-1. **清理三处死接口并修注册表泄漏。** `.plain` 去掉废参数（带废弃标注）、移除 `HelperService.run()`、
-   删除 `HelperTool`、`MainService` 注册表接上 `DispatchSourceProcess` 清理。更新架构总览第八节。
-   这一步不依赖平台，可单独构建与测试。
+1. **[已完成]** **清理三处死接口并修注册表泄漏。** `.plain` 去掉废参数（带废弃标注）、移除
+   `HelperService.run()`、删除 `HelperTool`、`MainService` 注册表接上 `DispatchSourceProcess` 清理。
+   更新架构总览第八节、`AGENTS.md` 与 `CHANGELOG.md`。这一步不依赖平台，可单独构建与测试。
+   新增测试 target `MainServiceTests`（3 个用例，拿真实子进程的退出驱动），全量 44 个测试通过。
 2. **冻结接口，并把版本协商定死。** 在 `Documentations/Architecture/` 写明只增不改的承诺与其边界。
    `FetchVersionRequest` 目前只回一个自由格式字符串，这里约定它必须是 `major.minor.patch`，并提供
    一个比较用的类型，使客户端能表达「我要求 daemon ≥ x.y.z」。同时在文档里写明：**判断 daemon 是否
@@ -454,3 +463,8 @@ SwiftyXPC 一旦开始回复，该测试就会失败，判别器随即恢复可�
 | 2026-10-27 | 记录：`ViewHierarchyCapture` 现有 CLI 是 arm64，因此注入 arm64e 目标本就会失败 | 注入方必须 arm64e（`ptrauth_sign_unauthenticated` 在 arm64 下是空操作）。其积压的四项验证中注入系统 App 那条与 `sudo` 无关，迁到 arm64e 的共享 daemon 后自动消失 |
 | 2026-10-27 | 记录：payload 离开 SwiftPM 是选择而非约束 | `LookInsideServer` 以纯 SwiftPM 包经 `xcodebuild ARCHS=...` 实测产出三切片。仍选 Xcode workspace 路线，因其在本机验证最充分且脚手架已固化配置 |
 | 2026-10-27 | 用户批准，开始实现。实现分支 `feature/shared-injection-daemon` | 开工前复核提案时发现两处与现实不符，已在本次一并修正（见上方两行关于 `errorIndicatesOutdatedPeer` 与版本协商的记录）|
+| 2026-10-27 | 平台 App 的 UI：AppKit 掌管生命周期，状态栏界面用 SwiftUI + `MacControlCenterUI`，经 `NSHostingSceneRepresentation` 挂载 | 用户指定。连带把平台 App 的部署目标定在 macOS 26.0（该 API 的引入版本），本库不受影响 |
+| 2026-10-27 | 注册表的清理键用「注册方自报的 pid」，不从 XPC 连接取 audit token | 取 audit token 要把连接对象透进消息 handler，那要改 `HelperHandler` 的签名——牵动每一个服务，代价远大于收益。注册方是经签名白名单准入的自己人，且报错 pid 的唯一后果是清理时机不对，不会造成越权 |
+| 2026-10-27 | `RegisterEndpointRequest` 的新字段设为 `Optional` | 它是线格式。设成必填会让不带该字段的老 peer 整个注册失败；设成可选则退化回原来的只增不减行为，只影响那一个条目 |
+| 2026-10-27 | 重复注册同一 identifier 时，先把它从旧 pid 的监视下摘掉 | sub-server 崩溃重启会用新 pid 重新注册同一 identifier。不摘，旧进程的退出事件稍后就会把刚接替它的那个活条目清掉。已由 `reRegisteringRebindsTheEntryToTheNewProcess` 钉住 |
+| 2026-10-27 | 进程监视改用私有串行队列，不用 `.main` | 事件处理只是跳进 actor，不需要主队列；而依赖主队列会让清理在任何不转主队列的环境里不可观察——包括测试进程 |

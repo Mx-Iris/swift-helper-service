@@ -32,6 +32,5 @@ public actor FilesService: HelperService {
         }
     }
 
-    public func run() async throws {}
 }
 #endif

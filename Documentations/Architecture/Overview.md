@@ -168,13 +168,17 @@ XPC 类型放进业务消息时，用 `HelperPeerEndpoint` 这个不透明包装
 
 | 位置 | 问题 |
 |---|---|
-| `HelperServerType.plain(name:identifier:)` | **`name` 参数从未被读取**。`HelperServer.swift:41` 是 `case .plain(_, let identifier)`，注册表里的 `name` 实际取自 `connectToTool(machServiceName:)` 的参数。这个参数目前是个摆设。 |
-| `HelperService.run()` | 协议要求每个服务实现它，但**没有任何地方调用**。所有现有实现都是空的 `{}`。 |
-| `Sources/HelperCommunication/HelperTool.swift` | `HelperTool` actor **没有任何使用者**，是死代码。（注意别和满仓库都在用的 `pingHelperTool()` / `isPrivilegedHelperTool` 混淆，那是不同的标识符。） |
-| `MainService` 的注册表 | **只增不减**。sub-server 进程退出后，它的 `XPCEndpoint` 仍留在表里，宿主 App 会拿到一个连不上的端点。对比 `InjectedEndpointRegistryService` —— 它用 `DispatchSourceProcess` 监听目标进程退出并自动清理，`MainService` 没有这层。 |
+| `HelperClient.errorIndicatesOutdatedPeer(_:)` | **不可能返回 `true`，而且从来不可能。** SwiftyXPC 只在 `XPCConnection.respond(to:)` 碰到未知消息名时抛 `unexpectedMessage`，而那条路把错误交给*接收方自己*的 `errorHandler` 后直接返回、**不回复**，于是调用方等到的是 `XPCError.connectionInterrupted` —— 过旧的 tool 与掉线无法区分。**保留它不是疏忽**：测试 `unhandledMessageDoesNotReachTheCallerAsUnexpectedMessage` 钉住了上游这个行为，上游一旦开始回复，该测试就会失败、这个判别器随即恢复可用。在那之前，判断 tool 是否过旧请用 `fetchToolVersion()` 主动查询。 |
 | 错误处理不统一 | `HelperServer` / `HelperPeer` 用 `@Loggable` + `#log`，`HelperClient` 和 `MainService` 用裸 `print(error)`。 |
 
 这些都不影响当前用法，但改动相关代码时值得先知道。
+
+另有四处已在提案
+[draft - 一个共享的注入 daemon](../Evolutions/draft-shared-injection-daemon.md) 的清理批次里修掉：
+`HelperServerType.plain` 那个从未被读取的 `name` 参数（现为 `.plain(identifier:)`，旧拼写保留为
+废弃的静态工厂）、无人调用的 `HelperService.run()` 协议要求、死代码 `HelperTool`，以及
+`MainService` 注册表只增不减 —— 它现在按注册方 pid 挂 `DispatchSourceProcess`，进程退出即清除，
+与 `InjectedEndpointRegistryService` 一致。
 
 ## 九、延伸阅读
 

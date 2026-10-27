@@ -26,7 +26,6 @@ public actor ApplicationsService: HelperService {
         startWorkspaceMonitor()
     }
 
-    public func run() async throws {}
 
     private func openApplication(request: OpenApplicationRequest) async throws -> OpenApplicationRequest.Response {
         let configuration = NSWorkspace.OpenConfiguration()
