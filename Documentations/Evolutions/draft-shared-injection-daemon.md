@@ -496,8 +496,19 @@ SwiftyXPC 一旦开始回复，该测试就会失败，判别器随即恢复可�
      「注入之前先把宿主这一端开起来」；以及**重连只有 XPC 有** —— socket 下 listener 在宿主这边，
      宿主重启后 payload 手里的连接已死且无法被告知新的，`hostReconnecting` 对沙盒目标直接抛错
      并说明原因，而不是给出一条永远连不上的链路。
-7. **抽出 `HookKit`。** 从 `InjectionScaffold` 模板搬进平台客户端库，保留它现有的签名校验、多候选
-   拼写与原子安装语义。
+7. **[已完成]** **抽出 `HookKit`。** 作为 `swift-helper-service` 的新 target 与 product，与
+   `HelperPeer` 并列 —— 它不需要 root，所以不进 daemon；放进本包而非另开仓库，是因为客户端本来就
+   依赖这个包，多一个仓库只为 340 行代码不划算。平台改为依赖它，删掉生成的那份副本。
+   新增 [HookKit.md](../Architecture/HookKit.md)，10 个测试（移植 9 个 + 新增 3 个），全量 101 个通过。
+
+   **搬的是 `DockIconOverride` 里那份，不是脚手架模板里那份。** 脚手架那份只有签名校验与原子安装；
+   多候选拼写是 macOS 27 给 Dock 的图标 setter 加参数之后在 `DockIconOverride` 里长出来的，提案写
+   「保留多候选拼写」时默认它已经在模板里 —— 实际不在。一并带过来的还有 `HookActivityReporter`
+   （「装上了 ≠ 跑起来了」）。
+
+   一处落地时的改写：`HookActivityReporter` 原来用 `Synchronization.Atomic`，那是 macOS 15，而本包
+   下限是 10.15，改为 `os_unfair_lock`。快路径从「一次 relaxed load」变成「一次无竞争加锁」，渲染
+   路径上够用，这一点在代码注释与文档里都写明了，没有含糊成「等价替换」。
 8. **菜单栏管理界面。** daemon 状态、已注入进程列表（只读 + 退出目标 App）、开发模式警告、升级入口
    （含「会打断当前注入会话」的告知）。
 9. **迁移 `ViewHierarchyCapture`。** 改为 Xcode workspace 结构（现有 SwiftPM 包保留，新增 payload 的

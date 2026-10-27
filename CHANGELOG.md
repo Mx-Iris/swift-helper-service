@@ -109,6 +109,33 @@ This file starts at 0.2.0. Earlier releases are not covered.
   The order between the two ends is fixed: **host first, then payload.** The dialer needs
   something to dial; in production that reads as "open the host link before injecting".
 
+- **`HookKit` — Objective-C method replacement, shared instead of generated per project.**
+  `MethodHookDescriptor`, `MethodHookVariant`, `MethodHookInstaller`, `MethodHookInspector`,
+  `HookActivityReporter`. See [HookKit.md](Documentations/Architecture/HookKit.md).
+
+  Every injection tool needs this and none of them needs root for it, so it sits beside
+  `HelperPeer` as a client library rather than inside the daemon. It was previously copied into
+  each project by the scaffold, which meant a lesson learned in one project never reached the
+  others — and each rule here is one some project paid for:
+
+  - The expected type encoding is checked against the live one before anything is swapped. A
+    method whose parameter list changed would otherwise be called through a replacement built
+    for the old signature, which corrupts registers and crashes the host with a stack that does
+    not point back here.
+  - A descriptor carries **candidate spellings** and the installer resolves to whichever the
+    host has. macOS 27 added a `glassCompositingFilter:` argument to the Dock's icon setters;
+    the pre-27 spellings stopped existing, and because installation is all-or-nothing the hooks
+    whose targets were fine did not go in either.
+  - When a host offers several candidates — macOS 27 kept the old setter alongside the new one —
+    the **earliest listed wins**, so order by which spelling the host is known to *call*. A hook
+    on a spelling the host no longer calls validates, logs success, and never runs.
+  - `HookActivityReporter` logs the first time a replacement actually runs, and answers `hasRun`.
+    Installed and ran are different facts, and the gap between them is the quietest failure in
+    this design.
+
+  `HookActivityReporter` uses `os_unfair_lock` rather than `Synchronization.Atomic`: `Atomic` is
+  macOS 15 and this package's floor is 10.15.
+
 ### Changed
 
 - **`InjectionService` checks the payload's architecture and signature before injecting.** Both

@@ -1,7 +1,7 @@
 #if os(macOS) || targetEnvironment(macCatalyst)
 import Foundation
 import HelperCommunication
-public import HelperService
+import HelperService
 
 /// Lets a `HelperService` mount itself on a socket link, the same way `XPCHelperHandler` lets
 /// it mount on an XPC listener.

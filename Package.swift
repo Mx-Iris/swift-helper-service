@@ -125,6 +125,10 @@ let package = Package(
             name: "InjectedEndpointRegistryServiceImplementation",
             targets: ["InjectedEndpointRegistryServiceImplementation"],
         ),
+        .library(
+            name: "HookKit",
+            targets: ["HookKit"],
+        ),
     ],
     dependencies: [
         .package(
@@ -271,6 +275,16 @@ let package = Package(
                 "HelperCommunication",
             ],
             path: "Sources/HelperServices/InjectedEndpointRegistryService/Implementation",
+        ),
+        .target(
+            name: "HookKit",
+            dependencies: [
+                .product(name: "FoundationToolbox", package: "FrameworkToolbox"),
+            ],
+        ),
+        .testTarget(
+            name: "HookKitTests",
+            dependencies: ["HookKit"],
         ),
         .testTarget(
             name: "HelperCommunicationTests",

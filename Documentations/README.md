@@ -33,6 +33,7 @@
 | [TypedMessaging.md](Architecture/TypedMessaging.md) | `Request`/`Response` 协议层。原生 XPC 的三类隐形错误；`identifier` 是路由键（因而是线格式的一部分）；为什么不用 `NSXPCInterface`；新增消息的完整步骤与兼容性演进；`HelperPeerEndpoint` 为何与裸 `XPCEndpoint` 线格式逐位相同。 | 新增一种消息、排查「消息发出去没人接」、或改动任何 `identifier` 之前。 |
 | [BrokeredPeer.md](Architecture/BrokeredPeer.md) | `HelperPeer` 的独立握手协议。Client/Server 命名为何容易误导；初次握手与重连的完整时序；**两阶段 `init` + `activate()` 为何必须存在**（否则有静默丢消息的竞态）；状态流为何用 `AsyncStream` 而非 Combine；与 `HelperServer`/`HelperClient` 的对照表。 | 用 `HelperPeerClient` / `HelperPeerServer`，或排查握手竞态时。**改动握手顺序前必读。** |
 | [WireCompatibility.md](Architecture/WireCompatibility.md) | 「只增不改」的承诺：共享 daemon 服务多个独立发版的客户端之后，为什么线格式必须冻结；哪四样东西已经是线格式；允许与不允许的演进；版本协商为什么必须主动问（`errorIndicatesOutdatedPeer` 不可能返回 `true`）；改动前的检查清单。 | 动任何 `Request`、`identifier`、`errorDomain` 或 `rawValue` 之前。 |
+| [HookKit.md](Architecture/HookKit.md) | `HookKit` —— 替换宿主进程里的 Objective-C 方法。类型编码校验为什么是整条链路里最值钱的一步、编码必须从活宿主读；多候选拼写的来历（macOS 27 给 Dock 的图标 setter 加参数）与「按宿主实际会调的拼写排序」；全或无的取舍及其代价；「装上了 ≠ 跑起来了」。 | 写 payload 的 hook、或某个 hook 装上了却没生效时。 |
 
 ### Guides —— 使用指南
 
