@@ -420,7 +420,7 @@ public struct InjectionRecord: Codable, Sendable {
 
 ## 落地步骤
 
-1. **建 `swift-injection-peer`，把 `HelperPeer` 与端点注册表搬进去，同一批次里从本库移出。**
+1. ✅ **建 `swift-injection-peer`，把 `HelperPeer` 与端点注册表搬进去，同一批次里从本库移出。**
    原样搬，不改 API；保留对本库 `HelperCommunication` 的依赖。
 
    **这两件事必须同批次，不能分开。** SPM 要求 target 名在**整个 package graph** 内唯一，而新库
@@ -428,8 +428,12 @@ public struct InjectionRecord: Codable, Sendable {
    `multiple packages declare targets with a conflicting name`）。所以初版设想的「本库两套并存，
    两边都能单独构建与测试」在 SPM 下不存在。本库在功能分支上移出，不影响任何现役使用者：它们依赖的
    是已发布的 0.3.x。
-2. **本库把新库需要的内部接口开成 `InjectionPeer` SPI。** 见「详细设计 / 跨 package 的访问级别」。
+2. ✅ **本库把新库需要的内部接口开成 `InjectionPeer` SPI。** 见「详细设计 / 跨 package 的访问级别」。
    没有这一步，新库的 XPC 那半边编译不过。
+
+   > 第 1、2 步落在 `feature/shared-injection-daemon` 的 `347f2e8`，新库落在它自己仓库的
+   > `b1895a1`。两边都编译干净、测试按原始退出码通过（本库 69 个测试 12 个套件，含那个走真实 XPC
+   > 连接的套件；新库 32 个测试 4 个套件）。**新库尚无远端仓库 —— 这是第 3 步的前提。**
 3. **四个使用者改依赖来源。** RuntimeViewer、`InjectionScaffold` 模板、`InjectionPlatform`、
    `ViewHierarchyCapture` 的 `Package.swift` 把这两个模块的 `package:` 指向新库，同时把
    `swift-helper-service` 升到移出后的版本。只改依赖声明、行为不变。
@@ -477,5 +481,11 @@ public struct InjectionRecord: Codable, Sendable {
 | 2026-10-28 | 新库保留对本库 `HelperCommunication` 的依赖 | 四个现役使用者本来全都依赖本库，保留不给任何人增加负担，请求类型也不必改。依赖方向「新库 → 本库」不成环，因为平台的参考载荷在 `InjectionPlatform` 仓库里而不在本库里。真出现非注入场景的使用者时再考虑泛型化 |
 | 2026-10-28 | 落地步骤改为「先建库、再改依赖来源、最后才移出」 | 初版把「移出模块」排在使用者改依赖之前，会让 RuntimeViewer 与 `InjectionPlatform` 同时编译不过。改后第 1、2 步是纯搬家，任何仓库都不会坏，第 3 步之后才有破坏性 |
 | 2026-10-28 | RuntimeViewer 的 daemon 不设签名要求：记一笔，不进本次 | 它挂着 `InjectionService()` 却用默认的 `nil`。不是本次改动造成的，纳入会压平本次范围。回传移出后它有了补上要求的条件，整治归 RuntimeViewer 自己的议程 |
+| 2026-10-28 | 落地步骤 1、2 完成 | 新库 `b1895a1`，本库 `347f2e8`（`feature/shared-injection-daemon`，已推送）。两边编译干净、测试按原始退出码通过 |
+| 2026-10-28 | 实测：SPM 不允许「两套并存」，落地顺序改为「搬出与移除同批次」 | target 名必须在整个 package graph 内唯一，而新库依赖本库 —— 只要本库还声明 `HelperPeer`，新库就无法解析。初版落地步骤设想的中间态不存在。改后本库在功能分支上移出，不影响依赖已发布 0.3.x 的现役使用者 |
+| 2026-10-28 | 九个 `package` 成员改走 `@_spi(InjectionPeer)`，而非升为 `public` | 跨 package 访问不到 `package`，而这九个成员只被 XPC 那半边用到（socket 半边零错误）。选 SPI 是因为 `package` 的本意就是「只给自己人用」，新库正是自己人、只是换了 package；升 `public` 会把刻意封装的实现变成公开契约。连带：相关文件的 `package import SwiftyXPC` 要升 `public import`（SPI 声明是 public 声明，不能带 package 类型），且本库内部的调用点也要改成 SPI import |
+| 2026-10-28 | mach-lookup 探测拆出并改名 `PeerProcessProbe` | `HelperProcessProbe` 的三个函数调用方零重叠：路径检查与签名状态字只服务注入路径，留在本库；mach-lookup 只服务通道，随新库走。改名是必须的 —— 同名 target 作为模块冲突，同名 C 函数作为符号冲突 |
+| 2026-10-28 | `BrokeredPeer.md` 随代码搬到新库，本库留存根 | 文档跟着它描述的代码走。存根是因为本库五个文件链接到那个路径（README、AGENTS.md、Glossary、Overview、ModuleLayering），留下可避免断链和读者白找 |
+| 2026-10-28 | 新库的 local 依赖暂指向本库的功能分支 worktree | 新库只能对「已经移出这些 target」的本库版本解析，而那只存在于功能分支上。SPM 从目录名推导 path 依赖的 identity，所以要显式传 `name:`（`ViewHierarchyCapture` 已踩过同一个坑）。功能分支合并发版后改成版本要求 |
 | 2026-10-28 | 用户批准，开始实现 | 状态 Draft → Accepted。实现叠在 `feature/shared-injection-daemon` 上（见头部「实现分支」）：那条分支未合并，而本提案修正的是它的决策，共用一条分支可避免留下「先实现被推翻的版本、再实现修正」的历史 |
 | 2026-10-28 | 调研过「用 distributed actor 实现通道」，不采用 | 自定义 `DistributedActorSystem` 技术上可行，运行时库 `libswiftDistributed` 也随系统提供（SDK 有 `.tbd`，含 arm64e target），payload 不必自带。但它解决的是「远程调用的语法与类型安全」，而端点发现、传输建立、握手、重连、端口推导一概不碰 —— `resolve(id:)` 的前提正是「已经知道 ID」。它只能加在通道之上，省不掉底下任何一行，而现在通道上只有一个请求类型，收益不足。新库的 `PeerMessaging` 抽象不排斥以后在上面加一层 |
