@@ -434,9 +434,17 @@ public struct InjectionRecord: Codable, Sendable {
    > 第 1、2 步落在 `feature/shared-injection-daemon` 的 `347f2e8`，新库落在它自己仓库的
    > `b1895a1`。两边都编译干净、测试按原始退出码通过（本库 69 个测试 12 个套件，含那个走真实 XPC
    > 连接的套件；新库 32 个测试 4 个套件）。**新库尚无远端仓库 —— 这是第 3 步的前提。**
-3. **四个使用者改依赖来源。** RuntimeViewer、`InjectionScaffold` 模板、`InjectionPlatform`、
-   `ViewHierarchyCapture` 的 `Package.swift` 把这两个模块的 `package:` 指向新库，同时把
-   `swift-helper-service` 升到移出后的版本。只改依赖声明、行为不变。
+3. 🟡 **四个使用者改依赖来源。** 把这两个模块的 `package:` 指向新库，同时把 `swift-helper-service`
+   升到移出后的版本。
+
+   > **完成一半，另一半被发版阻塞。** `InjectionPlatform` 与 `ViewHierarchyCapture` 本来就用 path
+   > 依赖指向本库的功能分支 worktree，可以立刻改，已完成。**RuntimeViewer 依赖已发布的
+   > `from: "0.3.1"`，`InjectionScaffold` 模板钉在 `exact: "0.1.4"`** —— 现在改它们就是指向不存在
+   > 的版本，必须等本库与新库都发版。发版不属于实现阶段。
+   >
+   > 两个能改的都用 **local path** 指向新库，而不是 `branch:`：SPM 拒绝「revision-based 依赖自身又
+   > 依赖 local package」，而新库只能对移出后的本库解析，那只存在于功能分支上。两处注释都写明了
+   > 发版后要换成版本要求。
 4. ✅ **共享 daemon 侧补注入记录。** 在 `InjectionService` 内部维护记录与进程退出清理，加
    `FetchInjectionRecordsRequest`。
 
@@ -445,12 +453,27 @@ public struct InjectionRecord: Codable, Sendable {
    > 记录按宿主 pid 索引而非追加成列表：同一进程注入两次是真实序列，有意义的答案是最后那次。
    > 进程退出清理照 `MainService` 的 `DispatchSourceProcess` 模式，但 pid 的来源更可靠 —— daemon
    > 自己执行注入，不需要谁来自报。
-5. **共享 daemon 摘掉 `InjectedEndpointRegistryService()`。** 从 `DaemonMain.swift` 的服务列表移除。
-6. **平台 App 改用注入记录。** `InjectedPayloadRegistry` 换数据源，界面措辞从「活着」改为「已注入」，
-   去掉实时状态判断。
-7. **`ViewHierarchyCapture` 改走 socket。** 去掉传输选择与 XPC 分支，恢复端到端可用。
-8. **平台的参考载荷改走 socket。** 同上，使平台保有自检能力。
-9. **文档同批次更新**（见「文档与示例」）。
+5. ✅ **共享 daemon 摘掉 `InjectedEndpointRegistryService()`。** 从 `DaemonMain.swift` 的服务列表移除。
+6. ✅ **平台 App 改用注入记录。** `InjectedPayloadRegistry` 换数据源，界面措辞从「活着」改为
+   「已注入」，去掉实时状态判断。
+
+   > 实现时定的状态模型（提案只给了一句话指引）：`ResidentPayload` 拆出一个 optional 的
+   > `reported`，**两种信息来源不混为一谈** —— 本次会话注入的有 channel，payload 答得出版本与 hook
+   > 数；从 daemon 记录继承的只有 pid、注入时间与 payload 路径，`reported` 为 nil，界面就只说
+   > 「injected · not reachable from this launch」，不编造版本号或「0 hooks」。`hasStalePayload`
+   > 对后者返回 false 而不是猜。进程名对继承的记录用 `NSRunningApplication` 查，查不到（daemon、
+   > helper 这类非 App 目标）就退回 payload 的文件名。
+   >
+   > `PayloadChannel.reconnect(to:)` 与 `reconnectToResidentPayloads()` 一并删除 —— socket 路径上
+   > App 是监听方，重连在原理上不存在。后者改名 `loadInjectionRecords()`，只读记录、不假装能重连。
+7. ✅ **`ViewHierarchyCapture` 改走 socket。** 去掉传输选择与 XPC 分支。
+8. ✅ **平台的参考载荷改走 socket。** 同上，使平台保有自检能力。顺带让 payload 彻底不再连 daemon，
+   少两个被映射进第三方进程的库（`HelperClient` 与注册表接口）。
+9. 🟡 **文档同批次更新**（见「文档与示例」）。本库 README / AGENTS.md / `BrokeredPeer.md` 存根、
+   `InjectionPlatform` 的 `CLAUDE.md`、`ViewHierarchyCapture` 的使用指南与实现说明都已改。
+   **剩下本库 `Documentations/` 里的架构文档与术语表**（`Overview.md`、`ModuleLayering.md`、
+   `TypedMessaging.md`、`Glossary.md` 等处对 `HelperPeer` 的叙述），它们描述的仍是同一套协议、
+   只是位置变了，留待一并整理。
 10. **端到端复验：在开发模式关闭的状态下，注入一个非本 Team 签名的目标并完成一次完整往返。**
     这是本提案是否成立的唯一判据 —— 它恰恰是改动前做不到的那件事。
 
