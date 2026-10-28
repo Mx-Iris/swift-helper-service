@@ -6,7 +6,7 @@ source-breaking changes.
 
 This file starts at 0.2.0. Earlier releases are not covered.
 
-## [Unreleased]
+## [0.4.0] — 2026-10-28
 
 ### Added
 
@@ -23,10 +23,10 @@ This file starts at 0.2.0. Earlier releases are not covered.
   `XPCListener` fixes the requirement at construction, so a daemon cannot tighten or relax it
   while running; switching means restarting.
 
-  The three anonymous listeners in `HelperPeer` keep `nil` deliberately, and now say why: the
-  process on the other end of a peer connection is whatever third-party app the payload was
-  injected into, so its signature cannot be known in advance. Access control for that hop is the
-  registry, which sits behind the tool's own requirement.
+  The peer listeners that deliberately keep `nil` have moved to
+  [`swift-injection-peer`](https://github.com/Mx-Iris/swift-injection-peer), along with the reason:
+  the process on the other end of a peer connection is whatever third-party app the payload was
+  injected into, so its signature cannot be known in advance.
 
 - **`HelperToolVersion` and `HelperClient.requireToolVersion(atLeast:)`.** Ask the tool whether it
   is new enough, rather than trying to infer it from a failure —
@@ -41,73 +41,6 @@ This file starts at 0.2.0. Earlier releases are not covered.
 
   **The version string a daemon reports must now be `major.minor.patch`.** That format is part of
   the wire contract; see `Documentations/Architecture/WireCompatibility.md`.
-
-### Added
-
-- **A loopback socket transport for peers that cannot use XPC** (`PeerSocketChannel`,
-  `PeerTransportSelection`, `PeerPortDerivation`).
-
-  The brokered XPC handshake needs both sides to look up the tool's Mach service, and a
-  sandboxed target cannot: App Sandbox runs a `(deny default)` profile whose `mach-lookup`
-  allowlist will not contain a third-party service, and seatbelt-profiled system daemons are
-  closed the same way without carrying an entitlement that would reveal it.
-
-  On the socket path **the roles invert — the host listens and the payload connects out.** A
-  sandboxed process can dial localhost, but nothing can discover a port it bound: the tool is
-  the blocked hop and a sandboxed app shares no directory with its host. Both sides therefore
-  derive the same port from one identifier instead of announcing it.
-
-  `PeerPortDerivation` uses djb2, **not `Hasher`** — `Hasher` is seeded per process, so the two
-  sides would derive different ports and wait on each other, a failure that only appears across
-  a process boundary.
-
-  Selection is a probe (`sandbox_check`), not entitlement sniffing, because the two sandbox
-  flavours that block this do not look alike. Callers use
-  `PeerTransportSelection.transport(forProcess:machServiceName:channelIdentifier:)`; the host
-  asks about its target before injecting, the payload asks about `getpid()` afterwards, and they
-  reach the same answer without negotiating.
-
-  Not covered: a real sandboxed target. Nothing here performs an injection, so that conclusion
-  rests on `sandbox_check`'s semantics and on RuntimeViewer's production experience.
-
-- **`PeerMessaging` and `PeerLink` — one surface over both transports.**
-
-  `PeerMessaging` is the four things every transport can do: send a typed request, answer one,
-  watch the state, cancel. `PeerConnection` now refines it and keeps the two members that are
-  specific to XPC — the publishable listener endpoint and the untyped name-keyed RPC.
-  `PeerSocketChannel` conforms, so code holding `any PeerMessaging` works on either path.
-
-  Making `PeerSocketChannel` conform to `PeerConnection` instead was the obvious move and the
-  wrong one: `listenerEndpoint` has no socket meaning — deriving the port is what the two sides
-  do *because* they have no channel on which to exchange an address — so conformance would be a
-  set of methods whose only behaviour is to throw.
-
-  `PeerLink.host(...)` / `PeerLink.payload(...)` probe, choose the transport, and construct the
-  matching end in one step, returning the link together with the `PeerTransport` that was
-  chosen. Both sides must compute the same answer, and keeping that computation in one place is
-  what stops them drifting: a host on XPC with its payload on a socket does not fail, it hangs.
-  The payload factory deliberately takes no pid — the payload is the target, so it asks
-  `getpid()`.
-
-  `PeerLink.hostReconnecting(...)` throws for a sandboxed target rather than returning a link
-  that never connects. Reconnecting works over XPC because the payload's listener outlives the
-  host app; on the socket path the host is the listener, so a restarted host leaves its payload
-  holding a dead connection with no way to be told about the new one.
-
-  `HelperService`s mount on a socket link too (`PeerSocketHelperHandler`). Without that, a
-  service written once would work on unsandboxed targets and silently do nothing on sandboxed
-  ones.
-
-- **`PeerSocketChannel` has the same two-phase lifecycle as the XPC peers.**
-  `preparedListener(onPort:)` / `preparedDialer(toPort:)` construct without touching the wire;
-  `activate()` starts it. Install handlers in between — the payload's first frame can arrive
-  before the handler registry has anything in it, and the far side is then told no handler
-  exists, which reads like a programming error rather than a race.
-
-  `listen(onPort:)` and `connect(toPort:)` remain as the both-phases convenience.
-
-  The order between the two ends is fixed: **host first, then payload.** The dialer needs
-  something to dial; in production that reads as "open the host link before injecting".
 
 - **`HookKit` — Objective-C method replacement, shared instead of generated per project.**
   `MethodHookDescriptor`, `MethodHookVariant`, `MethodHookInstaller`, `MethodHookInspector`,
@@ -158,28 +91,6 @@ This file starts at 0.2.0. Earlier releases are not covered.
   it cannot see clearly turns every unparseable file into a failed injection. Translated (Rosetta)
   targets also skip the architecture check, since the inference behind it does not hold for them.
 
-### Fixed
-
-- **The endpoint registry no longer grows forever.** A sub-server or peer that exited used to leave
-  its `XPCEndpoint` in `MainService`'s registry, so the next client to look it up received a handle
-  it could never connect to. Entries are now evicted when the process that registered them exits.
-
-  `RegisterEndpointRequest` gained an optional `registrantProcessIdentifier`, filled in by the
-  `registerEndpoint` behaviour extension rather than by callers. It is optional on purpose: a peer
-  built before this field existed sends a message without it, which decodes to `nil` and leaves
-  that one entry with the old grows-only behaviour instead of failing the registration.
-
-### Removed
-
-- **`HelperService.run()` is gone.** Nothing ever called it and every implementation was an empty
-  `{}`. Removing a protocol requirement does not break conforming types — a leftover `run()` on
-  your service still compiles, it is simply no longer an override. Only a direct `service.run()`
-  call would break, and there were none.
-- **`HelperTool` is gone.** Dead `package` actor with no references; never part of the public API.
-  Not to be confused with `pingHelperTool()` / `isPrivilegedHelperTool`, which are live.
-
-### Changed
-
 - **`HelperServerType.plain(name:identifier:)` → `.plain(identifier:)`.** The `name` was never
   read: `HelperServer` destructured the case as `case .plain(_, let identifier)`, and the registry
   key's `name` has always come from `connectToTool(machServiceName:)`.
@@ -201,6 +112,58 @@ This file starts at 0.2.0. Earlier releases are not covered.
   Fix by dropping the first binding: `case .plain(let identifier)`.
 
 - `MainService`'s process monitors run on a private serial queue instead of `.main`.
+
+- **The `SwiftyXPC` floor is now `0.5.105`**, up from `0.5.104`. Xcode 27 raises the lowest
+  supported macOS deployment target to 12.0, and at that floor 0.5.104's
+  `@available(macOS, obsoleted: 12.0)` marks a stored property unavailable across the whole
+  supported range — which Swift 6.4 rejects outright where earlier compilers only warned:
+
+  ```
+  error: stored properties cannot be marked unavailable with '@available'
+  ```
+
+  0.5.105 drops the attribute and changes nothing else, so this is a floor bump rather than a
+  behaviour change. Building against 0.5.104 under Xcode 27 fails before reaching any code in this
+  package.
+
+### Fixed
+
+- **The endpoint registry no longer grows forever.** A sub-server or peer that exited used to leave
+  its `XPCEndpoint` in `MainService`'s registry, so the next client to look it up received a handle
+  it could never connect to. Entries are now evicted when the process that registered them exits.
+
+  `RegisterEndpointRequest` gained an optional `registrantProcessIdentifier`, filled in by the
+  `registerEndpoint` behaviour extension rather than by callers. It is optional on purpose: a peer
+  built before this field existed sends a message without it, which decodes to `nil` and leaves
+  that one entry with the old grows-only behaviour instead of failing the registration.
+
+### Removed
+
+- **`HelperPeer` and `InjectedEndpointRegistryService` moved to
+  [`swift-injection-peer`](https://github.com/Mx-Iris/swift-injection-peer).** Neither needs root,
+  and a *shared* daemon cannot broker that channel in any case: the code signing requirement such a
+  listener must carry checks the **connecting process**, and a payload is a `dlopen`ed image with no
+  process identity of its own — so what actually gets checked is whichever third-party app was
+  injected, which will never carry this team's signature. A tool with its own daemon can leave the
+  requirement off and keep the registry there; a shared one cannot.
+
+  A downstream importing either target sees:
+
+  ```
+  error: no such module 'HelperPeer'
+  ```
+
+  Add the new package and change the import — the API moved unchanged. The two targets had to move
+  in the same release rather than being deprecated in place: SPM requires target names to be unique
+  across the whole package graph, so for as long as this package still declared `HelperPeer`,
+  nothing depending on both packages could resolve at all.
+
+- **`HelperService.run()` is gone.** Nothing ever called it and every implementation was an empty
+  `{}`. Removing a protocol requirement does not break conforming types — a leftover `run()` on
+  your service still compiles, it is simply no longer an override. Only a direct `service.run()`
+  call would break, and there were none.
+- **`HelperTool` is gone.** Dead `package` actor with no references; never part of the public API.
+  Not to be confused with `pingHelperTool()` / `isPrivilegedHelperTool`, which are live.
 
 ## [0.3.1] — 2026-08-11
 
