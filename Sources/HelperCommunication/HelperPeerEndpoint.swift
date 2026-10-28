@@ -1,6 +1,10 @@
 #if os(macOS) || targetEnvironment(macCatalyst)
 import Foundation
-@preconcurrency package import SwiftyXPC
+// `public` rather than `package`: the `InjectionPeer` SPI members below are public declarations
+// (SPI only gates who may name them), and a public declaration cannot have a package type in its
+// signature. Ordinary callers are unaffected — storing, passing and serializing
+// `HelperPeerEndpoint` never mentions `XPCEndpoint`, so they still need not import SwiftyXPC.
+@preconcurrency public import SwiftyXPC
 
 /// Opaque, lib-public wrapper around `SwiftyXPC.XPCEndpoint`.
 ///
@@ -16,13 +20,18 @@ import Foundation
 /// **bit-identical to a bare `SwiftyXPC.XPCEndpoint` in the same Codable position** — wrapping
 /// or unwrapping does not change what the daemon / peer sees.
 ///
-/// The `underlying` storage and the SwiftyXPC-typed initializer are `package`-visible so only
-/// lib-internal code can introspect/construct the wrapper. External callers can store, pass,
-/// and serialize `HelperPeerEndpoint` values but cannot reach the wrapped `XPCEndpoint`.
+/// The `underlying` storage and the SwiftyXPC-typed initializer are reachable only through the
+/// `InjectionPeer` SPI, so ordinary callers can store, pass and serialize `HelperPeerEndpoint`
+/// values but cannot reach the wrapped `XPCEndpoint`.
+///
+/// They were `package` until the peer channel moved to swift-injection-peer, which needs to
+/// construct and unwrap these while living in a different package. `@_spi` rather than plain
+/// `public` keeps the original intent — an interface for the implementation, not a promise to
+/// everybody — and makes the one library that may use it name itself at the import site.
 public struct HelperPeerEndpoint: Codable, Sendable {
-    package let underlying: SwiftyXPC.XPCEndpoint
+    @_spi(InjectionPeer) public let underlying: SwiftyXPC.XPCEndpoint
 
-    package init(_ underlying: SwiftyXPC.XPCEndpoint) {
+    @_spi(InjectionPeer) public init(_ underlying: SwiftyXPC.XPCEndpoint) {
         self.underlying = underlying
     }
 

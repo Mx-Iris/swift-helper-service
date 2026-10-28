@@ -74,10 +74,6 @@ let package = Package(
             targets: ["HelperServer"],
         ),
         .library(
-            name: "HelperPeer",
-            targets: ["HelperPeer"],
-        ),
-        .library(
             name: "InjectionService",
             targets: ["InjectionServiceInterface", "InjectionServiceImplementation"],
         ),
@@ -112,18 +108,6 @@ let package = Package(
         .library(
             name: "ApplicationsServiceImplementation",
             targets: ["ApplicationsServiceImplementation"],
-        ),
-        .library(
-            name: "InjectedEndpointRegistryService",
-            targets: ["InjectedEndpointRegistryServiceInterface", "InjectedEndpointRegistryServiceImplementation"],
-        ),
-        .library(
-            name: "InjectedEndpointRegistryServiceInterface",
-            targets: ["InjectedEndpointRegistryServiceInterface"],
-        ),
-        .library(
-            name: "InjectedEndpointRegistryServiceImplementation",
-            targets: ["InjectedEndpointRegistryServiceImplementation"],
         ),
         .library(
             name: "HookKit",
@@ -181,18 +165,6 @@ let package = Package(
                 "HelperService",
                 "HelperCommunication",
                 "MainService",
-                .product(name: "SwiftyXPC", package: "SwiftyXPC"),
-                .product(name: "FoundationToolbox", package: "FrameworkToolbox"),
-            ],
-        ),
-        .target(
-            name: "HelperPeer",
-            dependencies: [
-                "HelperCommunication",
-                "HelperService",
-                // For the mach-lookup probe that decides whether a payload can reach the tool
-                // over XPC at all, or has to fall back to a loopback socket.
-                "HelperProcessProbe",
                 .product(name: "SwiftyXPC", package: "SwiftyXPC"),
                 .product(name: "FoundationToolbox", package: "FrameworkToolbox"),
             ],
@@ -261,22 +233,6 @@ let package = Package(
             path: "Sources/HelperServices/ApplicationsService/Implementation",
         ),
         .target(
-            name: "InjectedEndpointRegistryServiceInterface",
-            dependencies: [
-                "HelperCommunication",
-            ],
-            path: "Sources/HelperServices/InjectedEndpointRegistryService/Interface",
-        ),
-        .target(
-            name: "InjectedEndpointRegistryServiceImplementation",
-            dependencies: [
-                "InjectedEndpointRegistryServiceInterface",
-                "HelperService",
-                "HelperCommunication",
-            ],
-            path: "Sources/HelperServices/InjectedEndpointRegistryService/Implementation",
-        ),
-        .target(
             name: "HookKit",
             dependencies: [
                 .product(name: "FoundationToolbox", package: "FrameworkToolbox"),
@@ -300,10 +256,6 @@ let package = Package(
                 "InjectionServiceInterface",
                 "InjectionServiceImplementation",
             ],
-        ),
-        .testTarget(
-            name: "HelperPeerTests",
-            dependencies: ["HelperPeer"],
         ),
         .testTarget(
             name: "MainServiceTests",

@@ -66,10 +66,14 @@ extension HelperServiceFailure {
     /// Registers ``HelperServiceFailure`` with `XPCErrorRegistry` so the decoding side
     /// reconstitutes it instead of falling back to a bare `BoxedError`.
     ///
-    /// Callers never have to do this — `HelperClient`, `HelperPeerClient` and
-    /// `HelperPeerServer` each call it from `init`. "Forgot to register" would degrade
-    /// silently back to the pre-fix behaviour, which is exactly the failure mode this
-    /// library has to close on the caller's behalf.
+    /// Callers never have to do this — `HelperClient` calls it from `init`, and so do
+    /// swift-injection-peer's `HelperPeerClient` and `HelperPeerServer`. "Forgot to register"
+    /// would degrade silently back to the pre-fix behaviour, which is exactly the failure mode
+    /// this library has to close on the caller's behalf.
+    ///
+    /// Exposed through the `InjectionPeer` SPI rather than left `package`, because those two peer
+    /// types now live in another package and still have to make this call. Nothing tells you when
+    /// it is missed: the errors just arrive as bare `BoxedError`s again.
     ///
     /// The domain string is passed explicitly rather than relying on `registerDomain`'s
     /// `String(reflecting: errorType)` default: that default is
@@ -79,7 +83,7 @@ extension HelperServiceFailure {
     ///
     /// Idempotent: `registerDomain` is a locked dictionary assignment, so repeat calls
     /// write the same entry.
-    package static func registerForDecoding() {
+    @_spi(InjectionPeer) public static func registerForDecoding() {
         XPCErrorRegistry.shared.registerDomain(errorDomain, forErrorType: HelperServiceFailure.self)
     }
 }

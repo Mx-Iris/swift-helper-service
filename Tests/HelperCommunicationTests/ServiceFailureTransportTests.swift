@@ -2,7 +2,10 @@
 import Foundation
 import Testing
 import HelperClient
-@testable import HelperCommunication
+// `@_spi` as well as `@testable`: the typed `sendMessage` / `setMessageHandler` and
+// `registerForDecoding()` moved from `package` to the `InjectionPeer` SPI, and `@testable` grants
+// internal access without granting SPI access.
+@_spi(InjectionPeer) @testable import HelperCommunication
 @preconcurrency import SwiftyXPC
 
 /// A request that exists only to give these tests something to fail on.

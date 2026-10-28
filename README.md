@@ -1,6 +1,8 @@
 # swift-helper-service
 
-A Swift Package that eliminates boilerplate when building a macOS **privileged helper tool** installed via `SMAppService.daemon(plistName:)`. It layers a typed, `async/await`-friendly request/response framework on top of [SwiftyXPC](https://github.com/MxIris-macOS-Library-Forks/SwiftyXPC), plus a discovery/endpoint-registry pattern so a single privileged helper can broker connections to any number of additional XPC servers — and a brokered peer-to-peer topology for processes that need to talk through the helper without the helper sitting in the middle of every message.
+A Swift Package that eliminates boilerplate when building a macOS **privileged helper tool** installed via `SMAppService.daemon(plistName:)`. It layers a typed, `async/await`-friendly request/response framework on top of [SwiftyXPC](https://github.com/MxIris-macOS-Library-Forks/SwiftyXPC), plus a discovery/endpoint-registry pattern so a single privileged helper can broker connections to any number of additional XPC servers.
+
+> **The payload ↔ host peer channel (`HelperPeer`) and the injected-endpoint registry now live in [swift-injection-peer](https://github.com/Mx-Iris/swift-injection-peer).** Neither needs any privilege, so neither belongs in a privileged-helper library. This package still provides what they are built on — `HelperCommunication`, `HelperService`, and the `InjectionPeer` SPI they reach through. If you were importing `HelperPeer` or `InjectedEndpointRegistryService*` from here, change which package you take them from; the module names and the API are unchanged.
 
 ## Why?
 
@@ -42,7 +44,7 @@ Then pick the products that match each binary's role:
 | Host app                   | `HelperClient`, every `*ServiceInterface` you call into                                 |
 | Privileged tool (the root) | `HelperServer`, every `*ServiceImplementation` you host, every `*ServiceInterface` too  |
 | Non-privileged sub-server  | `HelperServer` (with `HelperServerType.plain`), the service Implementation it provides  |
-| Brokered peer process      | `HelperPeer`, plus the `Request` types it exchanges                                     |
+| Brokered peer process      | `HelperCommunication`, plus `HelperPeer` from [swift-injection-peer](https://github.com/Mx-Iris/swift-injection-peer) |
 
 The Interface/Implementation split is the canonical pattern — it keeps heavyweight dependencies (e.g. `MachInjector`) out of the host app.
 
@@ -78,7 +80,7 @@ The reasoning behind this and the other load-bearing decisions is written up in 
 | `HelperService`                 | Protocol-only target — defines `HelperService`, `HelperHandler`, `HelperServerType`. Depend on this from anything that plugs into a server.                |
 | `HelperServer`                  | The actor that owns the `XPCListener`, prepends `MainService`, calls `setupHandler` on every service, and (for `.plain`) registers with the tool.          |
 | `HelperClient`                  | The actor used by the host app — install flow, tool connection, per-server connection cache, and `fetchToolVersion()`.                                     |
-| `HelperPeer`                    | Brokered host ↔ peer-process topology — `HelperPeerClient` and `HelperPeerServer` actors implementing the anonymous-listener / endpoint-handoff handshake. |
+| ~~`HelperPeer`~~                | Moved to [swift-injection-peer](https://github.com/Mx-Iris/swift-injection-peer), together with `InjectedEndpointRegistryService`. Reaches back into this package through the `InjectionPeer` SPI.           |
 | `HelperServices/MainService`    | Registry implementation that sits inside the tool. Also serves `FetchVersionRequest`.                                                                      |
 | `HelperServices/<Name>Service`  | Concrete services — always split into `Interface` (request types) and `Implementation` (handlers + heavyweight deps).                                      |
 
@@ -220,55 +222,30 @@ This wraps the SwiftyXPC-specific check so callers don't need to import or patte
 
 `HelperClient.daemonInstaller(plistName:)` (`@available(macOS 13, *)`) returns an `SMAppServiceDaemonInstaller` actor wrapping `SMAppService.daemon(plistName:)`. It exposes `register()` / `unregister()` / `refresh()` / `openLoginItemsSettings()` and a poll-free `statusStream: AsyncStream<SMAppService.Status>` that yields on every state-mutating call.
 
-## Brokered peer topology (`HelperPeer`)
+## Brokered peer topology (`HelperPeer`) — moved out
 
-For workflows where the host app talks to a *peer process* (e.g. an injected payload, a debug agent, a sidecar) through the privileged tool — but doesn't want every message to bounce off the tool — use `HelperPeer`:
+`HelperPeer` and `InjectedEndpointRegistryService` now live in
+**[swift-injection-peer](https://github.com/Mx-Iris/swift-injection-peer)**. Usage, both transports
+and where to mount the registry are documented there; the protocol itself is in that repo's
+[BrokeredPeer.md](https://github.com/Mx-Iris/swift-injection-peer/blob/main/Documentations/Architecture/BrokeredPeer.md).
 
-```
-┌──────────────┐       ┌───────────────┐       ┌──────────────┐
-│   Host app   │◀────▶│  Helper tool  │◀────▶│ Peer process │
-│ HelperPeer-  │  XPC  │   (broker)    │  XPC  │ HelperPeer-  │
-│   Client     │       │               │       │   Server     │
-└──────────────┘       └───────────────┘       └──────────────┘
-        ▲                                              ▲
-        └──────────── direct XPC after handshake ──────┘
-```
+**Why they left**: a payload talking to its own host needs no privilege, so it fails this library's
+admission test (*could this be done without root? then it does not belong here*). Injection needs
+`task_for_pid`; the channel back does not.
 
-Both sides conform to `PeerConnection`, expose an `AsyncStream<PeerConnectionState>` for state changes, and accept business `HelperService`s via the `services:` parameter.
+**What stayed, and still matters to that library**:
 
-### Two-phase lifecycle
+- `HelperCommunication` — the `Request` protocol, the wire format, and `HelperPeerEndpoint` (the
+  `Codable` wrapper around `XPCEndpoint` that registry payloads embed).
+- `HelperService` — the mountable-service shape, so a peer can host business services.
+- The **`InjectionPeer` SPI** — a handful of members that were `package` while the peer channel
+  lived here, and which it still needs from across a package boundary. They are SPI rather than
+  `public` on purpose: an interface for that one implementation, not a promise to everybody. Code
+  in this repository that calls them must `@_spi(InjectionPeer) import` the module.
 
-`HelperPeerClient.init(...)` / `HelperPeerServer.init(...)` only construct the listener, broker connection, and lib-internal handshake handlers (`PingRequest`, `ServerLaunchedNotification`, `ClientReconnectedNotification`). They do **not** activate the listener or register the endpoint with the broker.
-
-This lets you install your own business handlers via `setMessageHandler(...)` *before* the peer can route any inbound message — eliminating a race where the peer would send messages before the handlers are wired up.
-
-Call `activate()` exactly once after installing handlers. The peer then completes the handshake and transitions to `.connected`.
-
-```swift
-let peer = try await HelperPeerClient(
-    machServiceName: "com.example.HelperTool",
-    isPrivilegedHelperTool: true,
-    identifier: "io.example.injection-payload"
-)
-
-peer.setMessageHandler(MyRequest.self) { request in
-    // ...
-    return MyRequest.Response()
-}
-
-try await peer.activate()
-
-for await state in peer.stateStream {
-    switch state {
-    case .connecting:           print("handshake in progress")
-    case .connected:            print("peer is live")
-    case .disconnected(let e):  print("peer dropped: \(e)")
-    case .cancelled:            print("peer torn down"); return
-    }
-}
-```
-
-The module is intentionally UI-framework-agnostic: no Combine / Observation dependency.
+If you mount the endpoint registry on **your own** daemon, nothing about your setup was wrong —
+that is still the supported arrangement, and the reason only the *shared* platform stopped doing it
+is in [BrokeredPeer.md](Documentations/Architecture/BrokeredPeer.md).
 
 ## Conventions specific to this repo
 

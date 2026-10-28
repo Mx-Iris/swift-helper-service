@@ -1,7 +1,11 @@
 #if os(macOS) || targetEnvironment(macCatalyst)
 import Foundation
-import HelperService
-import HelperCommunication
+// SPI-qualified because `XPCHelperHandler.init(listener:)`, `pingHelperTool()` and
+// `registerEndpoint(...)` moved from `package` to the `InjectionPeer` SPI when the peer channel
+// went to its own package. An SPI member is not visible to its own package without naming the
+// group.
+@_spi(InjectionPeer) import HelperService
+@_spi(InjectionPeer) import HelperCommunication
 @preconcurrency private import SwiftyXPC
 import FoundationToolbox
 internal import MainService

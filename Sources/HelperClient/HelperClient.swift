@@ -1,6 +1,10 @@
 #if os(macOS) || targetEnvironment(macCatalyst)
 import Foundation
-import HelperCommunication
+// SPI-qualified because the members this client uses — the typed `sendMessage`, the endpoint
+// registry calls, `HelperServiceFailure.registerForDecoding()` — moved from `package` to the
+// `InjectionPeer` SPI when the peer channel went to its own package. An SPI member is not visible
+// to its own package without naming the group.
+@_spi(InjectionPeer) import HelperCommunication
 import ServiceManagement
 @preconcurrency private import SwiftyXPC
 

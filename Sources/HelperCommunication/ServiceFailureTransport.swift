@@ -13,8 +13,12 @@ import FoundationToolbox
 ///
 /// The subsystem is spelled out because a daemon has no bundle to infer one from:
 /// `@Loggable`'s default would fall back to the bare type name.
+/// Reachable through the `InjectionPeer` SPI because swift-injection-peer's peer channels install
+/// their own message handlers and must route through the same single place — otherwise their
+/// failures lose the description on the way out and leave no daemon-side record, which is exactly
+/// what this type exists to prevent.
 @Loggable(subsystem: "com.JH.HelperCommunication", category: "ServiceFailure")
-package enum ServiceFailureTransport {
+@_spi(InjectionPeer) public enum ServiceFailureTransport {
     /// Runs a message handler, logging and wrapping any failure that would otherwise
     /// lose its description on the way out.
     ///
@@ -22,7 +26,7 @@ package enum ServiceFailureTransport {
     /// carry those in full by itself, and they include its own `XPCConnection.Error`,
     /// which `HelperClient.errorIndicatesOutdatedPeer(_:)` pattern-matches on. Wrapping
     /// those would break the outdated-peer discriminator.
-    package static func wrappingFailures<Result>(
+    @_spi(InjectionPeer) public static func wrappingFailures<Result>(
         requestIdentifier: String?,
         operation: () async throws -> Result
     ) async throws -> Result {

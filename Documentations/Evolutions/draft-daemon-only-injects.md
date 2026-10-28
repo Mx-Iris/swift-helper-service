@@ -244,6 +244,43 @@ XPC 那半边（`HelperPeerClient` / `HelperPeerServer` / `PeerHandshakeRequests
 README 已经记着这套管道被 RuntimeViewer、MediaRemoteWizard、HopperMCP 各自手写过一遍，重复造轮子
 发生过三次，脚手架本身就是那次教训的产物。所以建公共库，不由单个客户端承接。
 
+### 跨 package 的访问级别：`InjectionPeer` SPI
+
+**这一节是实现时发现的，初版提案没有预见。** `HelperPeer` 的 XPC 那半边
+（`HelperPeerClient`、`HelperPeerServer`）用到本库九个 `package` 级成员，而 `package` 严格限于
+同一个 Swift package —— 搬到新库之后它们一概访问不到。socket 那半边不碰任何一个，所以这道裂缝
+恰好劈在两类使用者之间。
+
+处置是把这九个成员开成 **`@_spi(InjectionPeer)` public**，而不是升为正式 `public`：
+
+| 成员 | 所属 |
+|---|---|
+| `HelperPeerEndpoint.underlying`、`init(_:)` | `HelperCommunication` |
+| `XPCConnection.sendMessage(request:)` | `HelperCommunication` |
+| `XPCConnection.pingHelperTool()`、`registerEndpoint(...)`、`fetchEndpoint(...)` | `HelperCommunication` |
+| `XPCListener.setMessageHandler(requestType:handler:)` | `HelperCommunication` |
+| `HelperServiceFailure.registerForDecoding()` | `HelperCommunication` |
+| `ServiceFailureTransport` 与 `wrappingFailures(requestIdentifier:operation:)` | `HelperCommunication` |
+| `XPCHelperHandler.init(listener:)` | `HelperService` |
+
+**为什么是 SPI 而不是 `public`**：`package` 的本意是「只给自己人用」，而新库正是自己人、只是换了
+package。`@_spi` 精确表达这个语义 —— 不进入正式公开 API、不构成稳定承诺，而且使用方必须在 import
+处点名自己才能用。升为 `public` 则会把刻意封装的实现变成公开契约，`HelperPeerEndpoint.underlying`
+的原注释写得很直白：`package`-visible 就是为了让只有库内代码能构造和解包它。
+
+**两处连带效应，都要同批次处理**：
+
+- **涉及的文件要把 `package import SwiftyXPC` 升为 `public import`。** SPI 声明本质是 public 声明
+  （SPI 只约束谁能点名它），而 public 声明的签名里不能出现 package 类型 —— 实测报
+  `property cannot be declared public because its type uses a package type`。影响范围有限：普通
+  使用者存储、传递、序列化 `HelperPeerEndpoint` 时从不碰 `XPCEndpoint`，所以仍然不需要
+  `import SwiftyXPC`，原设计意图保住了。
+- **本库内部调用这些成员的地方也要改成 `@_spi(InjectionPeer) import`。** 这些成员是 `package` 时
+  在本库各模块间自由可见，变成 SPI 之后对自己的 package 也不再自动可见。实测受影响的是三个文件：
+  `HelperService/XPCHelperHandler.swift`、`HelperClient/HelperClient.swift`、
+  `HelperServer/HelperServer.swift`。这是 `@_spi` 相比 `package` 多出来的唯一常态成本 —— 新增一处
+  这类调用时，编译器会直截了当地报 `inaccessible due to '@_spi' protection level`，不会静默出错。
+
 ### 注入记录
 
 ```swift
@@ -383,13 +420,19 @@ public struct InjectionRecord: Codable, Sendable {
 
 ## 落地步骤
 
-1. **建 `swift-injection-peer`，把 `HelperPeer` 与端点注册表搬进去。** 原样搬，不改 API；保留对本库
-   `HelperCommunication` 的依赖。此时本库里两套并存，两边都能单独构建与测试。
-2. **四个使用者改依赖来源。** RuntimeViewer、`InjectionScaffold` 模板、`InjectionPlatform`、
-   `ViewHierarchyCapture` 的 `Package.swift` 把这两个模块的 `package:` 指向新库。只改依赖声明、
-   行为不变 —— 做完这一步，所有仓库仍然照旧工作。
-3. **本库移出这两个模块及其 product，更新 `Package.swift`。** 到这一步才出现破坏性变更，而上一步
-   已经让所有使用者不再从本库取它们。
+1. **建 `swift-injection-peer`，把 `HelperPeer` 与端点注册表搬进去，同一批次里从本库移出。**
+   原样搬，不改 API；保留对本库 `HelperCommunication` 的依赖。
+
+   **这两件事必须同批次，不能分开。** SPM 要求 target 名在**整个 package graph** 内唯一，而新库
+   依赖本库 —— 只要本库还声明 `HelperPeer`，新库就无法解析（实测报
+   `multiple packages declare targets with a conflicting name`）。所以初版设想的「本库两套并存，
+   两边都能单独构建与测试」在 SPM 下不存在。本库在功能分支上移出，不影响任何现役使用者：它们依赖的
+   是已发布的 0.3.x。
+2. **本库把新库需要的内部接口开成 `InjectionPeer` SPI。** 见「详细设计 / 跨 package 的访问级别」。
+   没有这一步，新库的 XPC 那半边编译不过。
+3. **四个使用者改依赖来源。** RuntimeViewer、`InjectionScaffold` 模板、`InjectionPlatform`、
+   `ViewHierarchyCapture` 的 `Package.swift` 把这两个模块的 `package:` 指向新库，同时把
+   `swift-helper-service` 升到移出后的版本。只改依赖声明、行为不变。
 4. **共享 daemon 侧补注入记录。** 在 `InjectionService` 内部维护记录与进程退出清理，加
    `FetchInjectionRecordsRequest`。
 5. **共享 daemon 摘掉 `InjectedEndpointRegistryService()`。** 从 `DaemonMain.swift` 的服务列表移除。
