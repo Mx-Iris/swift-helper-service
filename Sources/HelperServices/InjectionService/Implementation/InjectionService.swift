@@ -62,24 +62,109 @@ public actor InjectionService: HelperService {
         }
     }
 
+    /// What this daemon has injected, keyed by the host process.
+    ///
+    /// Keyed by pid rather than appended to a list: injecting into one process twice is a real
+    /// sequence, and the useful answer to "what is in there" is the latest one. The exit watch has
+    /// to be per-pid regardless.
+    private var recordsByHostProcessIdentifier: [pid_t: InjectionRecord] = [:]
+
+    /// One `.exit` watch per host process, so a record leaves when its process does.
+    ///
+    /// Same shape as `MainService`'s watch over registered endpoints, but the pid comes from
+    /// somewhere better: there the registrant reported it, which needed a rule about whether a
+    /// self-reported pid could be trusted. Here the daemon performed the injection, so it already
+    /// knows which process it wrote into.
+    private var processMonitorSources: [pid_t: any DispatchSourceProcess] = [:]
+
+    /// Exit events land here rather than on `.main`. The handler only kicks a `Task` into this
+    /// actor, so it needs no particular queue — and depending on the main queue would make the
+    /// cleanup unobservable anywhere that queue is not being serviced, a test process included.
+    private let processMonitorQueue = DispatchQueue(label: "com.JH.HelperService.InjectionService.ProcessMonitor")
+
     public init() {}
 
     public func setupHandler(_ handler: some HelperHandler) async {
-        handler.setMessageHandler { (request: InjectApplicationRequest) -> InjectApplicationRequest.Response in
+        handler.setMessageHandler { [weak self] (request: InjectApplicationRequest) -> InjectApplicationRequest.Response in
             // MachInjector calls `task_for_pid`, which requires a main-thread host port.
-            try await MainActor.run {
+            let strategyThatCarriedIt = try await MainActor.run {
                 try Self.inject(request: request)
             }
+            // Recorded only on the success path: `inject` throws on failure, and a record for an
+            // injection that did not happen is worse than no record.
+            await self?.recordInjection(
+                hostProcessIdentifier: request.pid,
+                payloadPath: request.dylibURL.path,
+                strategy: strategyThatCarriedIt
+            )
             return .empty
         }
+
+        handler.setMessageHandler { [weak self] (_: FetchInjectionRecordsRequest) -> FetchInjectionRecordsRequest.Response in
+            await self?.injectionRecords() ?? []
+        }
+    }
+
+    // MARK: - Injection records
+
+    /// Oldest first, which is the order a list in a user interface wants.
+    ///
+    /// `package` rather than `private` so the record lifecycle can be tested without performing a
+    /// real injection — nothing in this repository ever does that, and the part worth pinning is
+    /// what happens to a record afterwards.
+    package func injectionRecords() -> [InjectionRecord] {
+        recordsByHostProcessIdentifier.values.sorted { $0.injectedAt < $1.injectedAt }
+    }
+
+    /// `package` for the same reason as ``injectionRecords()``. Still no request can reach it:
+    /// the only message handler that writes a record is the injection itself.
+    package func recordInjection(
+        hostProcessIdentifier: pid_t,
+        payloadPath: String,
+        strategy: InjectionStrategy
+    ) {
+        recordsByHostProcessIdentifier[hostProcessIdentifier] = InjectionRecord(
+            hostProcessIdentifier: hostProcessIdentifier,
+            payloadPath: payloadPath,
+            injectedAt: Date(),
+            strategy: strategy
+        )
+        startMonitoring(hostProcessIdentifier: hostProcessIdentifier)
+    }
+
+    private func startMonitoring(hostProcessIdentifier: pid_t) {
+        guard processMonitorSources[hostProcessIdentifier] == nil else { return }
+        let source = DispatchSource.makeProcessSource(
+            identifier: hostProcessIdentifier,
+            eventMask: .exit,
+            queue: processMonitorQueue
+        )
+        source.setEventHandler { [weak self] in
+            guard let self else { return }
+            Task { await self.handleHostExit(hostProcessIdentifier: hostProcessIdentifier) }
+        }
+        processMonitorSources[hostProcessIdentifier] = source
+        source.resume()
+    }
+
+    private func handleHostExit(hostProcessIdentifier: pid_t) {
+        recordsByHostProcessIdentifier.removeValue(forKey: hostProcessIdentifier)
+        processMonitorSources[hostProcessIdentifier]?.cancel()
+        processMonitorSources.removeValue(forKey: hostProcessIdentifier)
     }
 
 
     /// Loads `request.dylibURL` into `request.pid`, attempting the simpler
     /// `dlopen` path first and falling back to `mach_vm_remap` only once the
     /// target has actually refused it — see ``InjectionStrategy``.
+    ///
+    /// Returns the strategy that **actually carried** the injection, which is not always the one
+    /// chosen up front: a `dlopen` the target refuses is followed by remap where that is allowed.
+    /// The caller records it, and a record claiming `dlopen` for an injection that ended up going
+    /// through remap would misdescribe the one thing the record is for.
     @MainActor
-    private static func inject(request: InjectApplicationRequest) throws {
+    @discardableResult
+    private static func inject(request: InjectApplicationRequest) throws -> InjectionStrategy {
         let payloadPath = request.dylibURL.path
         let targetPlatform = MachOPlatform.ofProcess(request.pid)
 
@@ -129,7 +214,7 @@ public actor InjectionService: HelperService {
                 case .blockedByCrossPlatformTarget:
                     throw crossPlatformDlopenRefusalError(pid: request.pid, dlopenFailure: error)
                 }
-                return
+                return .machVirtualMemoryRemap
             }
 
         case .machVirtualMemoryRemap:
@@ -141,10 +226,11 @@ public actor InjectionService: HelperService {
                 #log(.error, "pid \(request.pid, privacy: .public) runs on another platform and remap was pinned explicitly; this will most likely kill it")
             }
             try injectViaRemap(request: request, payloadPath: payloadPath, dlopenFailure: nil)
-            return
+            return .machVirtualMemoryRemap
         }
 
         try requireTargetIsStillRunning(pid: request.pid, strategy: .dlopen)
+        return .dlopen
     }
 
     /// Refuses a payload built for a different platform than its target.

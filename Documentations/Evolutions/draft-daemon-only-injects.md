@@ -437,8 +437,14 @@ public struct InjectionRecord: Codable, Sendable {
 3. **四个使用者改依赖来源。** RuntimeViewer、`InjectionScaffold` 模板、`InjectionPlatform`、
    `ViewHierarchyCapture` 的 `Package.swift` 把这两个模块的 `package:` 指向新库，同时把
    `swift-helper-service` 升到移出后的版本。只改依赖声明、行为不变。
-4. **共享 daemon 侧补注入记录。** 在 `InjectionService` 内部维护记录与进程退出清理，加
+4. ✅ **共享 daemon 侧补注入记录。** 在 `InjectionService` 内部维护记录与进程退出清理，加
    `FetchInjectionRecordsRequest`。
+
+   > 实现时定的两件事：`inject(request:)` 改为返回**实际生效**的 strategy（原先返回 void），否则
+   > 一次 `dlopen` 被拒、回退到 remap 的注入会被记成 `dlopen` —— 而 strategy 正是记录要说明的事。
+   > 记录按宿主 pid 索引而非追加成列表：同一进程注入两次是真实序列，有意义的答案是最后那次。
+   > 进程退出清理照 `MainService` 的 `DispatchSourceProcess` 模式，但 pid 的来源更可靠 —— daemon
+   > 自己执行注入，不需要谁来自报。
 5. **共享 daemon 摘掉 `InjectedEndpointRegistryService()`。** 从 `DaemonMain.swift` 的服务列表移除。
 6. **平台 App 改用注入记录。** `InjectedPayloadRegistry` 换数据源，界面措辞从「活着」改为「已注入」，
    去掉实时状态判断。
