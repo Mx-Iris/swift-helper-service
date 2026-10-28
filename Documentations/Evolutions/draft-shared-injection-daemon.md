@@ -3,7 +3,7 @@
 - **状态**: In Progress
 - **作者**: JH
 - **创建日期**: 2026-10-27
-- **最后更新**: 2026-10-27
+- **最后更新**: 2026-10-28
 - **所属愿景**: 无
 - **关联提案**: [0001](0001-injection-strategy-attempt-not-predict.md)（注入路径先尝试后退回）、[0002](0002-service-errors-that-survive-xpc.md)（服务端错误跨 XPC 保住描述）
 - **实现分支 / PR**: `feature/shared-injection-daemon`
@@ -522,7 +522,11 @@ SwiftyXPC 一旦开始回复，该测试就会失败，判别器随即恢复可�
      默认实现只有 `exit(NSApplicationMain(...))` 一行，既不构造那个类型也不赋值 `NSApp.delegate`；
      Xcode 的 AppKit 模板靠 `MainMenu.xib` 的 File's Owner 连 outlet 补上这一步，Apple 自己的
      `NSHostingSceneRepresentation` 文档示例也默认了那个前提。本项目没有 nib，结果是 App 起来、
-     run loop 转着、**一个 delegate 方法都没调用**，而且哪里都不报错。补了一个 `main.swift`。
+     run loop 转着、**一个 delegate 方法都没调用**，而且哪里都不报错。补法是在 delegate 类上自己
+     写一个 `static func main()` —— 具体类型上的成员会盖掉协议扩展里的默认实现。delegate 实例放在
+     `static let` 里而不是 `main()` 的局部变量：`NSApplication.delegate` 是弱引用，局部变量只是靠
+     「`NSApplicationMain` 不返回」才活着，那不是改这个函数的人应该先知道的事。（初版另建了一个
+     `main.swift`，效果相同，但把入口点和它构造的类型分在两处，已删除。）
    - ~~**`MenuBarExtra` 装不进 `NSHostingSceneRepresentation`。**~~ → **这条判错了，已纠正。**
      见下。
 
@@ -547,6 +551,22 @@ SwiftyXPC 一旦开始回复，该测试就会失败，判别器随即恢复可�
    `Window(id:)` + `environment.openWindow(id:)` **什么都不发生** —— 没有窗口对象、没有报错。
    bundle 里外、`NSApplicationMain` / `NSApplication.run()`、`.accessory` / 先切 `.regular`，
    四种条件都试过，全都一样。改用 `Settings` 之后顺带拿到 ⌘, 和 App 菜单项，而且它本来就是设置窗口。
+
+   **补上主菜单，这是接管 AppKit 生命周期的连带代价。** 一个菜单栏小工具也需要 `NSApp.mainMenu`：
+   `cut:` / `copy:` / `paste:` / `selectAll:` 是靠主菜单的 key equivalent 绑到聚焦的文本控件上的
+   —— 没有主菜单就没有 Edit 菜单，⌘C 什么都不做，而且不报错。设置窗口里有好几处
+   `.textSelection(.enabled)` 的内容（daemon 版本、最后一条注入错误、payload 的自检报告），它们
+   存在的意义就是被复制出去，而**能选不能复制比纯文本更糟，因为它看起来该能用**。顺带拿到的还有
+   ⌘, 打开设置、⌘W 关窗、⌘Q 退出、Hide/Hide Others，以及 Window 菜单里的窗口列表 —— SwiftUI
+   `App` 白送这一整套，接管了 AppKit 生命周期就得自己接管这一份。
+
+   用 UIFoundation 的 `MainMenu` result builder 装配，不画 nib：这个菜单只有四个顶级项，nib 的
+   内容在 diff 里没法审，而那个 builder 直接给出模板的标准项（标准 selector 与快捷键都接好了）。
+   不放 Format（没东西可格式化）、View（没有视图选项）、Help（没有帮助书，一个点不开任何东西的
+   Help 菜单比没有更糟）；File 只留 Close，因为 ⌘W 总得有地方待。Settings… 的 action 发给 `nil`
+   走响应链，终点是 App delegate 的 `showSettings(_:)`。有了主菜单也**不能**删掉
+   `ApplicationActivationPolicyController`：`.accessory` 的 App 不显示自己的菜单栏，key equivalent
+   照样生效但用户看不见，所以开窗之前切 `.regular` 这一步还在。
 
    **验证到哪一步：** App 构建通过；真实 App 启动后日志里有
    `Menu bar status item installed, button: true, visible: true` —— 那是
@@ -672,3 +692,5 @@ SwiftyXPC 一旦开始回复，该测试就会失败，判别器随即恢复可�
 | 2026-10-27 | 落地步骤 1–9、11–12 完成，10 受阻；待合并 | 全量测试：`swift-helper-service` 101 个、`ViewHierarchyCapture` 53 个、脚手架两种形态各构建通过 |
 | 2026-10-27 | ~~`MenuBarExtra` 装不进 `NSHostingSceneRepresentation`，状态栏项改回 AppKit~~ → **判错，已改回 `MenuBarExtra`** | 真正的原因是 `@main` 那条坑让 `addSceneRepresentation` 从未被调用；两个问题先后发现，修掉第二个之后没回头重试第一个。补做的四种写法对照实验全部在 t+1s 建出 `NSStatusBarWindow`。方法上的错是用 `CGWindowListCopyWindowInfo` 去否定，而状态栏项根本不出现在那里面 |
 | 2026-10-27 | 设置窗口改用 `Settings` 场景，不用 `Window(id:)` | 实测：托管场景里 `openWindow(id:)` 不呈现 `Window`，而 Apple 文档示例用的 `Settings` + `openSettings()` 可以。bundle 内外、两种 main、两种激活策略都试过。`Settings` 也正是这个窗口的身份，顺带拿到 ⌘, 和 App 菜单项 |
+| 2026-10-28 | 给平台 App 补主菜单，用 UIFoundation 的 `MainMenu` result builder 装配 | `cut:` / `copy:` / `paste:` / `selectAll:` 靠主菜单的 key equivalent 绑到聚焦的文本控件上，没有主菜单则 ⌘C 静默失效 —— 而设置窗口里几处可选中的内容（daemon 版本、最后一条注入错误、payload 自检报告）存在的意义正是被复制出去，能选不能复制比纯文本更糟。SwiftUI `App` 白送这一整套，接管 AppKit 生命周期就得自己接管。装配而不画 nib：只有四个顶级菜单，而 nib 的内容在 diff 里没法审。不放 Format / View / Help |
+| 2026-10-28 | ~~补了一个 `main.swift`~~ → **入口点改为 delegate 类上的 `static func main()`**，`main.swift` 删除 | 发现本身不变（`@main` 贴在 `NSApplicationDelegate` 上不会让它成为 delegate），改的是补法：具体类型上的成员会盖掉协议扩展里的默认实现，于是入口点和它构造的类型留在同一处。delegate 实例放 `static let` 而不是局部变量 —— `NSApplication.delegate` 是弱引用，局部变量只是靠 `NSApplicationMain` 不返回才活着 |
