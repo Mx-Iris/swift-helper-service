@@ -510,6 +510,8 @@ public struct InjectionRecord: Codable, Sendable {
 | 2026-10-28 | 新库保留对本库 `HelperCommunication` 的依赖 | 四个现役使用者本来全都依赖本库，保留不给任何人增加负担，请求类型也不必改。依赖方向「新库 → 本库」不成环，因为平台的参考载荷在 `InjectionPlatform` 仓库里而不在本库里。真出现非注入场景的使用者时再考虑泛型化 |
 | 2026-10-28 | 落地步骤改为「先建库、再改依赖来源、最后才移出」 | 初版把「移出模块」排在使用者改依赖之前，会让 RuntimeViewer 与 `InjectionPlatform` 同时编译不过。改后第 1、2 步是纯搬家，任何仓库都不会坏，第 3 步之后才有破坏性 |
 | 2026-10-28 | RuntimeViewer 的 daemon 不设签名要求：记一笔，不进本次 | 它挂着 `InjectionService()` 却用默认的 `nil`。不是本次改动造成的，纳入会压平本次范围。回传移出后它有了补上要求的条件，整治归 RuntimeViewer 自己的议程 |
+| 2026-10-28 | 新库改为无条件 path 依赖本库，删掉条件切换 helper | 从本库抄来的 `local:`/`remote:` 机制在这里有害：它只在设了 `USING_LOCAL_DEPENDENCIES` 时用本地 checkout，否则回落到已发布版本 —— 而新库**没有可回落的版本**（能解析的只有那个功能分支）。于是任何没设该变量的使用者都解析到不存在的 `0.4.0`，`InjectionPlatform` 的 `RunScript.sh` 整个跑不起来。helper 一并删掉而不是留着不用：留着会让人以为存在回落路径，而那正是造成这个 bug 的误读 |
+| 2026-10-28 | 纠正：此前报告的「x86_64 多架构链接失败是既有问题」不成立 | 那次 `xcodebuild` 漏了 `-destination 'generic/platform=macOS'`。不加它，SPM 依赖只按宿主架构构建，而 payload target 要 x86_64，于是链接失败 —— 是命令用错，不是依赖的架构覆盖缺陷。`RunScript.sh` 本来就带那个 destination，它的注释也明确警告过这一点。修好依赖解析后它构建通过，daemon 与 payload 都是 `x86_64 arm64 arm64e` |
 | 2026-10-28 | 落地步骤 1、2 完成 | 新库 `b1895a1`，本库 `347f2e8`（`feature/shared-injection-daemon`，已推送）。两边编译干净、测试按原始退出码通过 |
 | 2026-10-28 | 实测：SPM 不允许「两套并存」，落地顺序改为「搬出与移除同批次」 | target 名必须在整个 package graph 内唯一，而新库依赖本库 —— 只要本库还声明 `HelperPeer`，新库就无法解析。初版落地步骤设想的中间态不存在。改后本库在功能分支上移出，不影响依赖已发布 0.3.x 的现役使用者 |
 | 2026-10-28 | 九个 `package` 成员改走 `@_spi(InjectionPeer)`，而非升为 `public` | 跨 package 访问不到 `package`，而这九个成员只被 XPC 那半边用到（socket 半边零错误）。选 SPI 是因为 `package` 的本意就是「只给自己人用」，新库正是自己人、只是换了 package；升 `public` 会把刻意封装的实现变成公开契约。连带：相关文件的 `package import SwiftyXPC` 要升 `public import`（SPI 声明是 public 声明，不能带 package 类型），且本库内部的调用点也要改成 SPI import |
