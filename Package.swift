@@ -117,7 +117,7 @@ let package = Package(
     dependencies: [
         .package(
             url: "https://github.com/MxIris-macOS-Library-Forks/SwiftyXPC",
-            from: "0.5.104",
+            from: "0.5.105",
         ),
         .package(
             local: .package(

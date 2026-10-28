@@ -1,5 +1,5 @@
 {
-  "originHash" : "6f3b74cac0a92e47233a35374ecd13193e3c99244aca628427e75335b5f1b1cf",
+  "originHash" : "31b0d212bcc9185d09c58a68e98e61bb889dbbb1dad089bfcf8890cda58679ab",
   "pins" : [
     {
       "identity" : "frameworktoolbox",
@@ -33,8 +33,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/MxIris-macOS-Library-Forks/SwiftyXPC",
       "state" : {
-        "revision" : "4f67b80d2d21b0968ec6c6c45aa01389f1f1ed05",
-        "version" : "0.5.104"
+        "revision" : "7cd9e0944fde324d08832b7737a4b4470e2cde43",
+        "version" : "0.5.105"
       }
     }
   ],
