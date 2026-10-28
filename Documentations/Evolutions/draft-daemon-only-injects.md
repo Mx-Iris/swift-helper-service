@@ -474,8 +474,31 @@ public struct InjectionRecord: Codable, Sendable {
    **剩下本库 `Documentations/` 里的架构文档与术语表**（`Overview.md`、`ModuleLayering.md`、
    `TypedMessaging.md`、`Glossary.md` 等处对 `HelperPeer` 的叙述），它们描述的仍是同一套协议、
    只是位置变了，留待一并整理。
-10. **端到端复验：在开发模式关闭的状态下，注入一个非本 Team 签名的目标并完成一次完整往返。**
+10. ✅ **端到端复验：在开发模式关闭的状态下，注入一个非本 Team 签名的目标并完成一次完整往返。**
     这是本提案是否成立的唯一判据 —— 它恰恰是改动前做不到的那件事。
+
+    > **2026-10-28 通过。** 条件：开发模式**关闭**（`/Library/Application Support/InjectionPlatform/DeveloperMode.plist`
+    > 不存在 → `.disabled`，daemon 因此带着签名要求）；目标是 ad-hoc 签名、`TeamIdentifier=not set`
+    > 的 `probe-target`，即**不带本 Team 签名**。
+    >
+    > ```
+    > Target: pid 89340, native
+    > Channel: loopback socket on port 50169
+    > Injecting…
+    > Capturing…
+    > probe-target[89340].viewhierarchy
+    > ```
+    >
+    > 产出 440 KB 归档（解压后 2.3 MB），其中包含 `NSStackView`、`NSTableView`、
+    > `NSViewController`、`NSLayoutGuide`、`NSWindow` 与靶子自己的 view controller —— 正是 AppKit
+    > phase sequence 点名要问的那几个类型，所以这是一次有内容的捕获而不是空壳。
+    >
+    > 对照改动前：同一条链在 brokered XPC 上必然失败于回连，唯一绕法是打开开发模式。**这次没有
+    > 打开它。** `vhcapture` 自己仍需 Developer ID 签名才能连上 daemon（`swift build` 的产物是
+    > ad-hoc），那一跳是合理的、也保留着 —— 消除的是「被注入目标的签名」这个无法满足的要求。
+    >
+    > 跑这一步时抓到两个真 bug，都已修（见下方决策日志）：payload 的嵌入副本未随源码重新生成，
+    > 以及两侧从带 `#if DEBUG` 的名字推导端口、算出不同端口而双方都报成功。
 
 **顺序是有意这样排的**：第 1、2 步是纯搬家，做完任何仓库都不会坏；第 3 步之后才有破坏性。初版把
 「移出模块」排在使用者改依赖之前，那会让 RuntimeViewer 与 `InjectionPlatform` 同时编译不过，而它们
@@ -510,6 +533,10 @@ public struct InjectionRecord: Codable, Sendable {
 | 2026-10-28 | 新库保留对本库 `HelperCommunication` 的依赖 | 四个现役使用者本来全都依赖本库，保留不给任何人增加负担，请求类型也不必改。依赖方向「新库 → 本库」不成环，因为平台的参考载荷在 `InjectionPlatform` 仓库里而不在本库里。真出现非注入场景的使用者时再考虑泛型化 |
 | 2026-10-28 | 落地步骤改为「先建库、再改依赖来源、最后才移出」 | 初版把「移出模块」排在使用者改依赖之前，会让 RuntimeViewer 与 `InjectionPlatform` 同时编译不过。改后第 1、2 步是纯搬家，任何仓库都不会坏，第 3 步之后才有破坏性 |
 | 2026-10-28 | RuntimeViewer 的 daemon 不设签名要求：记一笔，不进本次 | 它挂着 `InjectionService()` 却用默认的 `nil`。不是本次改动造成的，纳入会压平本次范围。回传移出后它有了补上要求的条件，整治归 RuntimeViewer 自己的议程 |
+| 2026-10-28 | **端到端复验通过，判据达成** | 开发模式关闭、目标无本 Team 签名、完整往返，产出 440 KB 归档且内容吻合靶子的层级。详见落地步骤 10 |
+| 2026-10-28 | 端到端暴露 bug 一：payload 的嵌入副本未随源码重新生成 | 改了 `ViewHierarchyCapturePayloadCore` 却没重跑 `Payload/build_payload.sh`，于是 CLI 侧已走 socket、而 `vhcapture` 内嵌的仍是走 XPC 的旧 payload。嵌入副本是提交进仓库的源码，SwiftPM 构建不会重新生成它 —— 这类不一致编译期完全看不出来 |
+| 2026-10-28 | 端到端暴露 bug 二：两侧从带 `#if DEBUG` 的名字推导端口，算出不同端口 | CLI 来自 `swift build`（Debug），payload 来自 Xcode Release（arm64e 只能这么来），于是一侧用 `...service.debug.peer.<pid>`、另一侧用 `...service.peer.<pid>`，得到 53395 与 61237。**两侧都报成功**：CLI 等满超时后归咎于 payload 没回连，payload 则连着一个无人监听的端口。改用不随配置变化的 `peerChannelIdentifier` —— daemon 的 service 名本不该决定通道端口，那个名字只有 CLI 连 daemon 时需要，而这条通道根本不碰 daemon。两个回归测试从正反两面钉住 |
+| 2026-10-28 | payload 不再构建 x86_64 切片 | 脚本本来就在构建后立刻 `lipo -remove x86_64`。而开了 `iOSPackagesShouldBuildARM64e` 之后，package 的 target 只产出 arm64/arm64e，payload target 却仍索要 x86_64，于是链接失败 —— 连没有任何依赖的 target 也缺那个切片，所以这是 package 级的架构集合，与 payload 链接什么无关。索要一个包不会产出、且成功了也要丢掉的架构，只有失败和白费两种结局 |
 | 2026-10-28 | 新库改为无条件 path 依赖本库，删掉条件切换 helper | 从本库抄来的 `local:`/`remote:` 机制在这里有害：它只在设了 `USING_LOCAL_DEPENDENCIES` 时用本地 checkout，否则回落到已发布版本 —— 而新库**没有可回落的版本**（能解析的只有那个功能分支）。于是任何没设该变量的使用者都解析到不存在的 `0.4.0`，`InjectionPlatform` 的 `RunScript.sh` 整个跑不起来。helper 一并删掉而不是留着不用：留着会让人以为存在回落路径，而那正是造成这个 bug 的误读 |
 | 2026-10-28 | 纠正：此前报告的「x86_64 多架构链接失败是既有问题」不成立 | 那次 `xcodebuild` 漏了 `-destination 'generic/platform=macOS'`。不加它，SPM 依赖只按宿主架构构建，而 payload target 要 x86_64，于是链接失败 —— 是命令用错，不是依赖的架构覆盖缺陷。`RunScript.sh` 本来就带那个 destination，它的注释也明确警告过这一点。修好依赖解析后它构建通过，daemon 与 payload 都是 `x86_64 arm64 arm64e` |
 | 2026-10-28 | 落地步骤 1、2 完成 | 新库 `b1895a1`，本库 `347f2e8`（`feature/shared-injection-daemon`，已推送）。两边编译干净、测试按原始退出码通过 |
