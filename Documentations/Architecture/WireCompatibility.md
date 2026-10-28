@@ -5,7 +5,7 @@
 
 ## 一、以前不需要这条承诺，现在需要
 
-在[共享注入 daemon](../Evolutions/draft-shared-injection-daemon.md) 之前，每个 App 自带一个特权
+在[共享注入 daemon](../Evolutions/0003-shared-injection-daemon.md) 之前，每个 App 自带一个特权
 tool，两者**一起编译、一起安装、一起升级**。线格式变了也没人看得见——没有任何一刻存在「新客户端
 对老 tool」的组合。
 

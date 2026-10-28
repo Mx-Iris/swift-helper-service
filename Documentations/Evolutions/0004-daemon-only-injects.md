@@ -1,16 +1,16 @@
-# Draft - 共享 daemon 只管注入，回传通道移到独立库
+# 0004 - 共享 daemon 只管注入，回传通道移到独立库
 
-- **状态**: Accepted
+- **状态**: Implemented
 - **作者**: JH
 - **创建日期**: 2026-10-28
 - **最后更新**: 2026-10-28
 - **所属愿景**: 无
-- **关联提案**: [draft-shared-injection-daemon](draft-shared-injection-daemon.md)（本提案修正它关于
-  回传通道归属的决策）、[0001](0001-injection-strategy-attempt-not-predict.md)（注入路径先尝试后
-  退回）、[0002](0002-service-errors-that-survive-xpc.md)（服务端错误跨 XPC 保住描述）
-- **实现分支 / PR**: `feature/shared-injection-daemon` —— 与上一份提案共用一条分支。那条分支尚未合并进
-  `main`，而本提案推翻的正是它关于回传通道归属的决策；叠在同一条分支上，它最终呈现的就是修正后的方案，
-  不会留下「先实现被推翻的版本、再实现修正」的历史
+- **关联提案**: [0003](0003-shared-injection-daemon.md)（本提案修正它关于回传通道归属的决策）、
+  [0001](0001-injection-strategy-attempt-not-predict.md)（注入路径先尝试后退回）、
+  [0002](0002-service-errors-that-survive-xpc.md)（服务端错误跨 XPC 保住描述）
+- **实现分支 / PR**: `feature/shared-injection-daemon`（已合入 `main`）—— 与 [0003](0003-shared-injection-daemon.md)
+  共用一条分支。本提案推翻的正是它关于回传通道归属的决策；叠在同一条分支上，它最终呈现的就是修正后的
+  方案，不会留下「先实现被推翻的版本、再实现修正」的历史
 - **新建仓库**: `swift-injection-peer`，位于
   `/Volumes/Repositories/Private/Personal/Library/macOS/swift-injection-peer`，与本库、`MachInjector`
   同级。它自己的 API 设计提案写在该仓库内，不属于本提案
@@ -71,7 +71,7 @@ App，没有一个满足。给 payload 签 Developer ID 不改变任何事。
 
 ### 为什么回传不该留在共享 daemon 里
 
-[draft-shared-injection-daemon](draft-shared-injection-daemon.md) 为共享 daemon 立下的准入判据是：
+[0003](0003-shared-injection-daemon.md) 为共享 daemon 立下的准入判据是：
 **没有 root 真的做不到吗？做得到就不该进来。** 按这条判据复核回传：
 
 - **注入**需要 `task_for_pid`，离不开 root。
@@ -168,7 +168,7 @@ App，没有一个满足。给 payload 签 Developer ID 不改变任何事。
 目标进程退出时清理记录的机制可以沿用现有实现（功能分支上那条
 `fix(registry): evict endpoints when the process that registered them exits` 的进程监视），
 只是监视的触发者从「payload 自报 pid」变成「daemon 自己注入时就知道的 pid」—— 于是
-[draft-shared-injection-daemon](draft-shared-injection-daemon.md) 里「注册方自报 pid 可信」
+[0003](0003-shared-injection-daemon.md) 里「注册方自报 pid 可信」
 那条假设不再需要成立。
 
 ### 回传移出共享 daemon，通道代码搬到新库
@@ -325,7 +325,7 @@ public struct InjectionRecord: Codable, Sendable {
 的问题用凭证而非签名解决。
 
 **为什么否**：`dlopen` 路径下 payload 的构造函数没有参数通路，凭证只能走环境变量或文件，而沙盒目标
-读不到约定路径的文件（[draft-shared-injection-daemon](draft-shared-injection-daemon.md) 已记录过
+读不到约定路径的文件（[0003](0003-shared-injection-daemon.md) 已记录过
 这一点，RuntimeViewer 正因此放弃了文件式端口发现）。范围显著扩大，而它解决的问题在回传移出平台后
 不再存在。
 
@@ -533,6 +533,10 @@ public struct InjectionRecord: Codable, Sendable {
 | 2026-10-28 | 新库保留对本库 `HelperCommunication` 的依赖 | 四个现役使用者本来全都依赖本库，保留不给任何人增加负担，请求类型也不必改。依赖方向「新库 → 本库」不成环，因为平台的参考载荷在 `InjectionPlatform` 仓库里而不在本库里。真出现非注入场景的使用者时再考虑泛型化 |
 | 2026-10-28 | 落地步骤改为「先建库、再改依赖来源、最后才移出」 | 初版把「移出模块」排在使用者改依赖之前，会让 RuntimeViewer 与 `InjectionPlatform` 同时编译不过。改后第 1、2 步是纯搬家，任何仓库都不会坏，第 3 步之后才有破坏性 |
 | 2026-10-28 | RuntimeViewer 的 daemon 不设签名要求：记一笔，不进本次 | 它挂着 `InjectionService()` 却用默认的 `nil`。不是本次改动造成的，纳入会压平本次范围。回传移出后它有了补上要求的条件，整治归 RuntimeViewer 自己的议程 |
+| 2026-10-28 | 实现完成，取号 0004，状态 Implemented，合入 `main` | 10 个落地步骤中 8 个完成。**两项未完：** 第 3 步的另一半（RuntimeViewer 与 `InjectionScaffold` 模板改依赖来源）被发版阻塞 —— 它们依赖已发布版本，指向尚不存在的版本只会弄坏它们；第 9 步剩本库架构文档与术语表里对 `HelperPeer` 的叙述，它们描述的协议没错、只是位置变了。两项都列为后续项 |
+| 2026-10-28 | 文档判断：需要的都已随代码落地，不另写实现说明 | 「为什么**共享** daemon 不中转回传，而专属 daemon 可以」这条决策写进了 `BrokeredPeer.md` 的存根与 `InjectionPlatform` 的 `CLAUDE.md`，没有单独成文的必要。新术语 `InjectionRecord` 的语义在类型文档注释里讲清了（「只表示注入过，不表示 payload 还活着」），且本库术语表尚无「端点」条目可对照，暂不登记 |
+| 2026-10-28 | 后续项：payload 带着用不到的 XPC 代码 | payload 链接整个 `HelperPeer` product，而它只用 socket 那半边。镜像里仍有 `HelperPeerClient` / `HelperPeerServer` 的符号。对一个被映射进第三方进程的镜像，依赖面越小越好 —— 新库可以拆出只含 socket 的 product，但那属于新库自己的 API 设计 |
+| 2026-10-28 | 后续项：arm64e 系统 App 的端到端仍未验证 | 本次用的靶子是 `dlopen` 路径上的 AppKit App。Dock、Finder 这类 arm64e 进程走 remap 路径，那一条还没跑过。它同时也是 [0003](0003-shared-injection-daemon.md) 第 10 步剩下的那一半 |
 | 2026-10-28 | **端到端复验通过，判据达成** | 开发模式关闭、目标无本 Team 签名、完整往返，产出 440 KB 归档且内容吻合靶子的层级。详见落地步骤 10 |
 | 2026-10-28 | 端到端暴露 bug 一：payload 的嵌入副本未随源码重新生成 | 改了 `ViewHierarchyCapturePayloadCore` 却没重跑 `Payload/build_payload.sh`，于是 CLI 侧已走 socket、而 `vhcapture` 内嵌的仍是走 XPC 的旧 payload。嵌入副本是提交进仓库的源码，SwiftPM 构建不会重新生成它 —— 这类不一致编译期完全看不出来 |
 | 2026-10-28 | 端到端暴露 bug 二：两侧从带 `#if DEBUG` 的名字推导端口，算出不同端口 | CLI 来自 `swift build`（Debug），payload 来自 Xcode Release（arm64e 只能这么来），于是一侧用 `...service.debug.peer.<pid>`、另一侧用 `...service.peer.<pid>`，得到 53395 与 61237。**两侧都报成功**：CLI 等满超时后归咎于 payload 没回连，payload 则连着一个无人监听的端口。改用不随配置变化的 `peerChannelIdentifier` —— daemon 的 service 名本不该决定通道端口，那个名字只有 CLI 连 daemon 时需要，而这条通道根本不碰 daemon。两个回归测试从正反两面钉住 |

@@ -1,13 +1,13 @@
-# Draft - 一个共享的注入 daemon
+# 0003 - 一个共享的注入 daemon
 
-- **状态**: In Progress
+- **状态**: Implemented
 - **作者**: JH
 - **创建日期**: 2026-10-27
 - **最后更新**: 2026-10-28
 - **所属愿景**: 无
-- **关联提案**: [0001](0001-injection-strategy-attempt-not-predict.md)（注入路径先尝试后退回）、[0002](0002-service-errors-that-survive-xpc.md)（服务端错误跨 XPC 保住描述）
-- **实现分支 / PR**: `feature/shared-injection-daemon`
-- **配套文档**: 待定 —— 落地时登记实现说明 / 使用指南的链接
+- **关联提案**: [0001](0001-injection-strategy-attempt-not-predict.md)（注入路径先尝试后退回）、[0002](0002-service-errors-that-survive-xpc.md)（服务端错误跨 XPC 保住描述）、[0004](0004-daemon-only-injects.md)（修正本提案关于回传通道归属的决策）
+- **实现分支 / PR**: `feature/shared-injection-daemon`（已合入 `main`）
+- **配套文档**: 无独立实现说明。架构决策留在本文；daemon 服务清单与信任模型记在 `InjectionPlatform` 的 `CLAUDE.md`
 
 ## 摘要
 
@@ -597,11 +597,22 @@ SwiftyXPC 一旦开始回复，该测试就会失败，判别器随即恢复可�
 
    顺带修掉 `main` 上一个既有的编译失败：`MachOPlatformReader.platforms` 里局部 `let platforms` 遮蔽了
    同名静态方法，编译器报的是「failed to produce diagnostic for expression」。
-10. **[受阻]** **端到端验证。** 对 AppKit 靶子与一个 arm64e 系统 App 各跑一次 —— **没能做。**
+10. **[部分完成]** **端到端验证。** 对 AppKit 靶子与一个 arm64e 系统 App 各跑一次 ——
+    **AppKit 靶子那一半 2026-10-28 做掉了，arm64e 系统 App 仍未做。**
 
-    **卡点**：共享 daemon 必须由用户在「系统设置 › 通用 › 登录项」批准，`SMAppService.register()`
-    触发的是一个只能由人完成的授权。agent 做不了这一步，也不该替用户做。换言之卡点从
-    `ViewHierarchyCapture` 原来的「`sudo` 要交互输密码」换成了「登录项要人批准」，并没有消失。
+    **卡点已解除**：用户自己安装并批准了 daemon，于是这一步不再需要 agent 完成那个只能由人做的
+    授权。随后在 `probe-target`（AppKit，ad-hoc 签名因此不带本 Team 签名）上跑通了完整往返：
+    注入 → loopback socket 通道 → 捕获 → 回传，产出 440 KB 归档（解压 2.3 MB），内容含
+    `NSStackView` / `NSTableView` / `NSViewController` / `NSLayoutGuide`，与靶子的层级吻合。
+    开发模式**保持关闭**。详见 [0004](0004-daemon-only-injects.md) 的落地步骤 10。
+
+    **仍未做的是 arm64e 系统 App**（Dock、Finder 这类）—— 它要走 remap 路径，而上面那次是
+    `dlopen`。列为后续项，不阻塞本提案落地。
+
+    **原卡点的记录**（保留，因为它解释了为什么这一步积压了这么久）：共享 daemon 必须由用户在
+    「系统设置 › 通用 › 登录项」批准，`SMAppService.register()` 触发的是一个只能由人完成的授权。
+    agent 做不了这一步，也不该替用户做。换言之卡点从 `ViewHierarchyCapture` 原来的「`sudo` 要
+    交互输密码」换成了「登录项要人批准」，并没有消失 —— 直到用户自己完成了它。
 
     **在这个边界之内验证到的：**
 
@@ -694,3 +705,6 @@ SwiftyXPC 一旦开始回复，该测试就会失败，判别器随即恢复可�
 | 2026-10-27 | 设置窗口改用 `Settings` 场景，不用 `Window(id:)` | 实测：托管场景里 `openWindow(id:)` 不呈现 `Window`，而 Apple 文档示例用的 `Settings` + `openSettings()` 可以。bundle 内外、两种 main、两种激活策略都试过。`Settings` 也正是这个窗口的身份，顺带拿到 ⌘, 和 App 菜单项 |
 | 2026-10-28 | 给平台 App 补主菜单，用 UIFoundation 的 `MainMenu` result builder 装配 | `cut:` / `copy:` / `paste:` / `selectAll:` 靠主菜单的 key equivalent 绑到聚焦的文本控件上，没有主菜单则 ⌘C 静默失效 —— 而设置窗口里几处可选中的内容（daemon 版本、最后一条注入错误、payload 自检报告）存在的意义正是被复制出去，能选不能复制比纯文本更糟。SwiftUI `App` 白送这一整套，接管 AppKit 生命周期就得自己接管。装配而不画 nib：只有四个顶级菜单，而 nib 的内容在 diff 里没法审。不放 Format / View / Help |
 | 2026-10-28 | ~~补了一个 `main.swift`~~ → **入口点改为 delegate 类上的 `static func main()`**，`main.swift` 删除 | 发现本身不变（`@main` 贴在 `NSApplicationDelegate` 上不会让它成为 delegate），改的是补法：具体类型上的成员会盖掉协议扩展里的默认实现，于是入口点和它构造的类型留在同一处。delegate 实例放 `static let` 而不是局部变量 —— `NSApplication.delegate` 是弱引用，局部变量只是靠 `NSApplicationMain` 不返回才活着 |
+| 2026-10-28 | 端到端验证的卡点解除，第 10 步由 [受阻] 改为 [部分完成] | 用户自己安装并批准了 daemon，那个只能由人完成的授权不再挡路。随后在 AppKit 靶子上跑通完整往返（详见 [0004](0004-daemon-only-injects.md) 的落地步骤 10）。**arm64e 系统 App 仍未验证** —— 它走 remap 而非 `dlopen`，列为后续项 |
+| 2026-10-28 | 实现完成，取号 0003，状态 Implemented，合入 `main` | 12 个落地步骤中 11 个完成，第 10 步部分完成（见上）。本提案关于「平台提供标准回传通道」的决策随后被 [0004](0004-daemon-only-injects.md) 修正 —— 那不是本提案未实现，而是实现之后被实测推翻：共享 daemon 的签名要求校验连接对端进程，而 payload 没有独立进程身份 |
+| 2026-10-28 | 文档判断：不需要额外的使用指南或实现说明 | 架构论证留在本文，daemon 的服务清单与信任模型记在 `InjectionPlatform` 的 `CLAUDE.md`，回传通道的协议随代码移到 `swift-injection-peer` 的 `BrokeredPeer.md`。未引入需要登记进术语表的新术语 |

@@ -54,19 +54,19 @@
   —— 服务端抛的错到达调用方时只剩 domain + code，描述全丢；daemon 侧又无日志，失败两端不留痕。
   在通道层统一包装成一个 `Codable` 的传输错误类型并记日志，所有现有服务一行不改即受益。落地时还
   带来了本仓库**第一个真实 XPC 往返测试**，并借此发现 `errorIndicatesOutdatedPeer` 一直是失效的。
-- [draft - 一个共享的注入 daemon](Evolutions/draft-shared-injection-daemon.md) —— 把「每个注入工具
+- [0003 - 一个共享的注入 daemon](Evolutions/0003-shared-injection-daemon.md) —— 把「每个注入工具
   各带一个特权 daemon」改成「全机一个共享 daemon」：用户只在登录项批准一次，此后所有工具作为客户端
   连它。daemon 里只放注入与端点注册表；本库补上标准回传通道、注入前的 payload 校验与 `HookKit`。
   含 arm64e 切片的五处配置加一个 destination、与 `InjectionScaffold` 的分工，以及冻结接口前的清理
-  批次。状态 **Accepted**，实现在 `feature/shared-injection-daemon`。
-- [draft - 共享 daemon 只管注入，回传通道移到独立库](Evolutions/draft-daemon-only-injects.md) ——
+  批次。状态 **Implemented**。它关于「平台提供标准回传通道」的决策随后被 0004 修正。
+- [0004 - 共享 daemon 只管注入，回传通道移到独立库](Evolutions/0004-daemon-only-injects.md) ——
   修正上一份提案关于回传通道归属的决策。共享 daemon 的签名要求校验的是**连接对端进程**，而 payload
   没有独立进程身份，于是被校验的是被注入的那个 App —— 任何非本 Team 签名的目标都无法回连，唯一绕法
   是打开开发模式，而那让注入请求本身也失去校验。方案是把回传移出**共享** daemon：它只留注入，端点
   注册表与 `HelperPeer` **搬到新库 `swift-injection-peer`**（不是删除 —— 自带 daemon 的工具
   broker 是自己，签名要求自己说了算，那两样在那里一直正常工作）。含首次端到端验证的实测日志、
-  「两难只属于共享 daemon」的查证，以及五条被否方案。状态 **Accepted**，实现与上一份提案共用
-  `feature/shared-injection-daemon`。
+  「两难只属于共享 daemon」的查证，以及五条被否方案。状态 **Implemented** —— 端到端判据已达成：
+  开发模式关闭、目标不带本 Team 签名、完整往返。
 
 ### 其他
 

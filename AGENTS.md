@@ -95,7 +95,7 @@ is a source-breaking change and needs a proposal.
 |---|---|
 | `HelperClient.errorIndicatesOutdatedPeer(_:)` | **Cannot return `true`, and never could.** Kept deliberately as a sentinel — see Versioning below. |
 
-Four more were cleaned up in the `draft-shared-injection-daemon` proposal's first batch and are
+Four more were cleaned up in the `0003-shared-injection-daemon` proposal's first batch and are
 no longer rough: `HelperServerType.plain`'s unread `name` (now `.plain(identifier:)`, with the old
 spelling kept as a deprecated static factory), the uncalled `HelperService.run()` requirement, the
 dead `HelperTool` actor, and `MainService`'s grows-only registry (it now hangs a

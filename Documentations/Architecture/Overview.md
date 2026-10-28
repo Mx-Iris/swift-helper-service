@@ -174,7 +174,7 @@ XPC 类型放进业务消息时，用 `HelperPeerEndpoint` 这个不透明包装
 这些都不影响当前用法，但改动相关代码时值得先知道。
 
 四处原本列在这里的问题已在提案
-[draft - 一个共享的注入 daemon](../Evolutions/draft-shared-injection-daemon.md) 的清理批次里修掉，
+[0003 - 一个共享的注入 daemon](../Evolutions/0003-shared-injection-daemon.md) 的清理批次里修掉，
 因此从上表移除：`HelperServerType.plain` 那个从未被读取的 `name` 参数（现为 `.plain(identifier:)`，
 旧拼写保留为废弃的静态工厂）、无人调用的 `HelperService.run()` 协议要求、死代码 `HelperTool`，
 以及 `MainService` 注册表只增不减 —— 它现在按注册方 pid 挂 `DispatchSourceProcess`，进程退出即清除，

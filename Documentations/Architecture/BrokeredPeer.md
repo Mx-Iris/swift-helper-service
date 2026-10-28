@@ -9,7 +9,7 @@
 ## 为什么移走
 
 payload 与它客户端之间的通道**不需要任何特权**，所以它不属于「特权 helper 服务」这个库。完整论证见
-提案 [共享 daemon 只管注入，回传通道移到独立库](../Evolutions/draft-daemon-only-injects.md)。
+提案 [共享 daemon 只管注入，回传通道移到独立库](../Evolutions/0004-daemon-only-injects.md)。
 
 **要紧的是：这不等于「这套协议错了」。** 自带 daemon 的工具（RuntimeViewer、`InjectionScaffold`
 生成的项目）把端点注册表挂在自己的 daemon 上，broker 就是它自己，签名要求自己说了算 —— brokered XPC

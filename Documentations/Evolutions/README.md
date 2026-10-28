@@ -11,8 +11,8 @@
 |---|------|------|
 | [0001](0001-injection-strategy-attempt-not-predict.md) | 注入路径改为「先尝试后退回」，不再预测目标是否接受 dlopen | Implemented |
 | [0002](0002-service-errors-that-survive-xpc.md) | 服务端错误跨 XPC 保住描述，并在 daemon 侧留下日志 | Implemented |
-| [draft](draft-shared-injection-daemon.md) | 一个共享的注入 daemon | Accepted |
-| [draft](draft-daemon-only-injects.md) | 共享 daemon 只管注入，回传通道移到独立库 | Accepted |
+| [0003](0003-shared-injection-daemon.md) | 一个共享的注入 daemon | Implemented |
+| [0004](0004-daemon-only-injects.md) | 共享 daemon 只管注入，回传通道移到独立库 | Implemented |
 
 ## 状态机
 
