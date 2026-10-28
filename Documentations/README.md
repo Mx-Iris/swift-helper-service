@@ -59,6 +59,14 @@
   连它。daemon 里只放注入与端点注册表；本库补上标准回传通道、注入前的 payload 校验与 `HookKit`。
   含 arm64e 切片的五处配置加一个 destination、与 `InjectionScaffold` 的分工，以及冻结接口前的清理
   批次。状态 **Accepted**，实现在 `feature/shared-injection-daemon`。
+- [draft - 共享 daemon 只管注入，回传通道移到独立库](Evolutions/draft-daemon-only-injects.md) ——
+  修正上一份提案关于回传通道归属的决策。共享 daemon 的签名要求校验的是**连接对端进程**，而 payload
+  没有独立进程身份，于是被校验的是被注入的那个 App —— 任何非本 Team 签名的目标都无法回连，唯一绕法
+  是打开开发模式，而那让注入请求本身也失去校验。方案是把回传移出**共享** daemon：它只留注入，端点
+  注册表与 `HelperPeer` **搬到新库 `swift-injection-peer`**（不是删除 —— 自带 daemon 的工具
+  broker 是自己，签名要求自己说了算，那两样在那里一直正常工作）。含首次端到端验证的实测日志、
+  「两难只属于共享 daemon」的查证，以及五条被否方案。状态 **Accepted**，实现与上一份提案共用
+  `feature/shared-injection-daemon`。
 
 ### 其他
 
